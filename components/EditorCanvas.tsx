@@ -1,12 +1,11 @@
 'use client';
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { EditorState } from '@/types/editor';
+import { EditorState, FaceAdjustments, Adjustments, SkinSettings, FaceLandmark, FilterPreset } from '@/types/editor';
 import { applyColorAdjustments, applyVignetteOverlay } from '@/lib/imageAdjust';
-import { applyLiquify } from '@/lib/liquify';
+import { applyLiquifyInto, addLiquifyStroke } from '@/lib/liquify';
 import { applySkinSmooth, applyPrivacyBlur } from '@/lib/skinSmooth';
 import { applyFilter } from '@/lib/filters';
 import { buildFaceControlPoints, applyFaceWarp } from '@/lib/faceWarp';
-import { addLiquifyStroke } from '@/lib/liquify';
 import { paintSkinMask, eraseSkinMask } from '@/lib/skinSmooth';
 
 interface Props {
@@ -19,7 +18,19 @@ interface Props {
   onHistoryPush?: () => void;
 }
 
-
+/** Fields that affect the "base" image (everything except liquify) */
+interface BaseKey {
+  image: HTMLImageElement | null;
+  landmarks: FaceLandmark[] | null;
+  faceAdj: FaceAdjustments;
+  adj: Adjustments;
+  filter: FilterPreset;
+  skinMask: Float32Array | null;
+  skinSettings: SkinSettings;
+  privacyMask: Float32Array | null;
+  w: number;
+  h: number;
+}
 
 export default function EditorCanvas({
   state,
@@ -37,10 +48,61 @@ export default function EditorCanvas({
   const [displayH, setDisplayH] = useState(0);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const isDragging = useRef(false);
-  const lastPos = useRef<{ x: number; y: number } | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+
+  // Zoom / pan (view only — never affect canvas pixels)
+  const [zoom, setZoom] = useState(1.0);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const zoomRef = useRef(1.0);
+  const panRef = useRef({ x: 0, y: 0 });
+  zoomRef.current = zoom;
+  panRef.current = pan;
+
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // --- Performance: base image cache (rendered without liquify) ---
+  const baseImgRef = useRef<ImageData | null>(null);
+  const prevBaseKeyRef = useRef<BaseKey | null>(null);
+
+  // --- Performance: local liquify fields during drag (bypass React state) ---
+  const liqDXRef = useRef<Float32Array | null>(null);
+  const liqDYRef = useRef<Float32Array | null>(null);
+  const isLiquifyDragRef = useRef(false);
+  const hasLiquifyRef = useRef(false); // true if any displacement exists
+
+  // --- Performance: pre-allocated output buffer for liquify (reused each frame) ---
+  const outBufRef = useRef<Uint8ClampedArray | null>(null);
+
+  // --- Canvas 2D context (willReadFrequently keeps pixels on CPU) ---
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  useEffect(() => {
+    if (canvasRef.current) {
+      ctxRef.current = canvasRef.current.getContext('2d', { willReadFrequently: true });
+    }
+  }, []);
+
+  // --- Pan state (ref for immediate, state for cursor re-render) ---
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+
+  // Drag state for tools
+  const isDragging = useRef(false);
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  // Sync local liquify refs when state changes (outside of drag)
+  useEffect(() => {
+    if (!isLiquifyDragRef.current) {
+      liqDXRef.current = state.liquifyDX;
+      liqDYRef.current = state.liquifyDY;
+      hasLiquifyRef.current = false;
+      if (state.liquifyDX) {
+        for (let i = 0; i < state.liquifyDX.length; i += 500) {
+          if (state.liquifyDX[i] !== 0) { hasLiquifyRef.current = true; break; }
+        }
+      }
+    }
+  }, [state.liquifyDX, state.liquifyDY]);
 
   // --- Compute display dimensions ---
   useEffect(() => {
@@ -53,17 +115,24 @@ export default function EditorCanvas({
     const scale = Math.min(cw / iw, ch / ih, 1);
     setDisplayW(Math.round(iw * scale));
     setDisplayH(Math.round(ih * scale));
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
   }, [state.originalImage]);
 
-  // --- Canvas render pipeline ---
-  const render = useCallback(() => {
+  // --- Core render function (imperative, can be called directly) ---
+  const renderCanvas = useCallback(() => {
     const s = stateRef.current;
     const canvas = canvasRef.current;
     if (!canvas || !s.originalImage || displayW === 0) return;
 
-    canvas.width = displayW;
-    canvas.height = displayH;
-    const ctx = canvas.getContext('2d');
+    // Resize canvas if needed (clears surface but keeps context options)
+    if (canvas.width !== displayW || canvas.height !== displayH) {
+      canvas.width = displayW;
+      canvas.height = displayH;
+      // Re-grab context after resize
+      ctxRef.current = canvas.getContext('2d', { willReadFrequently: true });
+    }
+    const ctx = ctxRef.current;
     if (!ctx) return;
 
     if (s.showOriginal) {
@@ -71,98 +140,165 @@ export default function EditorCanvas({
       return;
     }
 
-    // Draw image to get ImageData
-    ctx.drawImage(s.originalImage, 0, 0, displayW, displayH);
-    let imageData = ctx.getImageData(0, 0, displayW, displayH);
+    // --- Check if base image needs recompute ---
+    const bk = prevBaseKeyRef.current;
+    const needsBase = !bk ||
+      bk.image !== s.originalImage ||
+      bk.landmarks !== s.landmarks ||
+      bk.faceAdj !== s.faceAdjustments ||
+      bk.adj !== s.adjustments ||
+      bk.filter !== s.activeFilter ||
+      bk.skinMask !== s.skinMask ||
+      bk.skinSettings !== s.skinSettings ||
+      bk.privacyMask !== s.privacyMask ||
+      bk.w !== displayW || bk.h !== displayH;
 
-    // Face warp (only if landmarks detected and any face adj != 0)
-    if (s.landmarks && s.landmarks.length > 400) {
-      const cps = buildFaceControlPoints(s.landmarks, s.faceAdjustments);
-      if (cps.length > 0) {
-        imageData = applyFaceWarp(imageData, cps);
-      }
-    }
+    if (needsBase) {
+      ctx.drawImage(s.originalImage, 0, 0, displayW, displayH);
+      let id = ctx.getImageData(0, 0, displayW, displayH);
 
-    // Liquify
-    if (s.liquifyDX && s.liquifyDY) {
-      // Check if any displacement exists
-      let hasDisp = false;
-      for (let i = 0; i < Math.min(100, s.liquifyDX.length); i++) {
-        if (s.liquifyDX[i] !== 0) { hasDisp = true; break; }
+      // Face warp (expensive — cached so only runs on adj changes)
+      if (s.landmarks && s.landmarks.length > 400) {
+        const cps = buildFaceControlPoints(s.landmarks, s.faceAdjustments);
+        if (cps.length > 0) id = applyFaceWarp(id, cps);
       }
-      if (!hasDisp) {
-        for (let i = 0; i < s.liquifyDX.length; i += 100) {
-          if (s.liquifyDX[i] !== 0) { hasDisp = true; break; }
+
+      // Skin smooth
+      if (s.skinMask) {
+        let hasMask = false;
+        for (let i = 0; i < s.skinMask.length; i += 200) {
+          if (s.skinMask[i] > 0) { hasMask = true; break; }
         }
+        if (hasMask) id = applySkinSmooth(id, s.skinMask, s.skinSettings.smoothness, s.skinSettings.skinBrightness);
       }
-      if (hasDisp) imageData = applyLiquify(imageData, s.liquifyDX, s.liquifyDY);
-    }
 
-    // Skin smooth
-    if (s.skinMask) {
-      const hasMask = s.skinMask.some(v => v > 0);
-      if (hasMask) {
-        imageData = applySkinSmooth(imageData, s.skinMask, s.skinSettings.smoothness, s.skinSettings.skinBrightness);
+      // Privacy blur
+      if (s.privacyMask) {
+        let hasMask = false;
+        for (let i = 0; i < s.privacyMask.length; i += 200) {
+          if (s.privacyMask[i] > 0) { hasMask = true; break; }
+        }
+        if (hasMask) id = applyPrivacyBlur(id, s.privacyMask);
       }
+
+      // Color adjustments + filter
+      id = applyColorAdjustments(id, s.adjustments);
+      if (s.activeFilter !== 'none') id = applyFilter(id, s.activeFilter);
+
+      baseImgRef.current = id;
+      prevBaseKeyRef.current = {
+        image: s.originalImage, landmarks: s.landmarks,
+        faceAdj: s.faceAdjustments, adj: s.adjustments,
+        filter: s.activeFilter, skinMask: s.skinMask,
+        skinSettings: s.skinSettings, privacyMask: s.privacyMask,
+        w: displayW, h: displayH,
+      };
     }
 
-    // Privacy blur
-    if (s.privacyMask) {
-      const hasMask = s.privacyMask.some(v => v > 0);
-      if (hasMask) imageData = applyPrivacyBlur(imageData, s.privacyMask);
+    const base = baseImgRef.current!;
+    const dx = liqDXRef.current;
+    const dy = liqDYRef.current;
+
+    // Apply liquify into pre-allocated buffer (zero new allocations during drag)
+    if (hasLiquifyRef.current && dx && dy) {
+      const needed = displayW * displayH * 4;
+      if (!outBufRef.current || outBufRef.current.length !== needed) {
+        outBufRef.current = new Uint8ClampedArray(new ArrayBuffer(needed));
+      }
+      applyLiquifyInto(base.data, outBufRef.current, dx, dy, displayW, displayH);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ctx.putImageData(new ImageData(outBufRef.current as any, displayW, displayH), 0, 0);
+    } else {
+      ctx.putImageData(base, 0, 0);
     }
 
-    // Color adjustments
-    imageData = applyColorAdjustments(imageData, s.adjustments);
-
-    // Filter
-    if (s.activeFilter !== 'none') {
-      imageData = applyFilter(imageData, s.activeFilter);
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-
-    // Vignette overlay
+    // Vignette (canvas overlay, no ImageData needed)
     if (s.adjustments.vignette > 0) {
       applyVignetteOverlay(ctx, displayW, displayH, s.adjustments.vignette);
     }
   }, [displayW, displayH]);
 
-  // --- Schedule render when state changes ---
+  // --- Schedule render when state changes (via React) ---
   useEffect(() => {
     if (!state.originalImage) return;
     if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
     renderReqRef.current = requestAnimationFrame(() => {
-      render();
+      renderCanvas();
       if (canvasRef.current) onCanvasReady(canvasRef.current);
     });
     return () => {
       if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
     };
-  }, [state.renderVersion, state.originalImage, displayW, displayH, render, onCanvasReady]);
+  }, [state.renderVersion, state.originalImage, displayW, displayH, renderCanvas, onCanvasReady]);
 
-  // --- Coordinate helper ---
-  const getCanvasCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } => {
-    const canvas = canvasRef.current!;
+  // --- Mouse wheel zoom (passive: false required to preventDefault) ---
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handler = (e: WheelEvent) => {
+      if (!stateRef.current.originalImage) return;
+      e.preventDefault();
+      const rect = container.getBoundingClientRect();
+      // Cursor position relative to container center
+      const mx = e.clientX - rect.left - rect.width / 2;
+      const my = e.clientY - rect.top - rect.height / 2;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const oldZoom = zoomRef.current;
+      const newZoom = Math.min(8, Math.max(0.1, oldZoom * factor));
+      const ratio = newZoom / oldZoom;
+      // Keep the canvas point under cursor fixed in screen space
+      setZoom(newZoom);
+      setPan(p => ({
+        x: mx * (1 - ratio) + p.x * ratio,
+        y: my * (1 - ratio) + p.y * ratio,
+      }));
+    };
+    container.addEventListener('wheel', handler, { passive: false });
+    return () => container.removeEventListener('wheel', handler);
+  }, []);
+
+  // --- Canvas coordinate helper (accounts for zoom via getBoundingClientRect) ---
+  const getCanvasCoords = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
     return {
-      x: (e.clientX - rect.left) * (canvas.width / rect.width),
-      y: (e.clientY - rect.top) * (canvas.height / rect.height),
+      x: (clientX - rect.left) * (canvas.width / rect.width),
+      y: (clientY - rect.top) * (canvas.height / rect.height),
     };
   }, []);
 
-  // --- Mouse handlers ---
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  // --- All mouse events on the container ---
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const s = stateRef.current;
     if (!s.originalImage) return;
+
+    // Middle mouse or select tool = pan
+    if (e.button === 1 || s.activeTool === 'select') {
+      e.preventDefault();
+      isPanningRef.current = true;
+      setIsPanning(true);
+      panStartRef.current = { mx: e.clientX, my: e.clientY, px: panRef.current.x, py: panRef.current.y };
+      return;
+    }
+
+    const pos = getCanvasCoords(e.clientX, e.clientY);
+    if (!pos) return;
     isDragging.current = true;
-    const pos = getCanvasCoords(e);
     lastPos.current = pos;
+
+    if (s.activeTool === 'liquify') {
+      isLiquifyDragRef.current = true;
+      // Copy state into local mutable refs (one copy on drag start, not per-move)
+      liqDXRef.current = s.liquifyDX ? new Float32Array(s.liquifyDX) : new Float32Array(displayW * displayH);
+      liqDYRef.current = s.liquifyDY ? new Float32Array(s.liquifyDY) : new Float32Array(displayW * displayH);
+      return;
+    }
 
     if (s.activeTool === 'skinBrush') {
       const mask = s.skinMask ? new Float32Array(s.skinMask) : new Float32Array(displayW * displayH);
-      const erase = e.altKey;
-      if (erase) eraseSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize);
+      if (e.altKey) eraseSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize);
       else paintSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize, 1);
       onSkinMaskUpdate(mask);
     }
@@ -173,83 +309,96 @@ export default function EditorCanvas({
     }
   }, [getCanvasCoords, displayW, displayH, onSkinMaskUpdate, onPrivacyMaskUpdate]);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const s = stateRef.current;
-    const pos = getCanvasCoords(e);
+
+    // Panning
+    if (isPanningRef.current) {
+      const ps = panStartRef.current;
+      setPan({ x: ps.px + (e.clientX - ps.mx), y: ps.py + (e.clientY - ps.my) });
+      return;
+    }
+
+    const pos = getCanvasCoords(e.clientX, e.clientY);
     setCursorPos(pos);
 
-    if (!isDragging.current || !s.originalImage) return;
+    if (!isDragging.current || !s.originalImage || !pos) return;
+
     const last = lastPos.current ?? pos;
-    const dx = pos.x - last.x;
-    const dy = pos.y - last.y;
+    const ddx = pos.x - last.x;
+    const ddy = pos.y - last.y;
     lastPos.current = pos;
 
     if (s.activeTool === 'liquify') {
-      const dxF = s.liquifyDX ? new Float32Array(s.liquifyDX) : new Float32Array(displayW * displayH);
-      const dyF = s.liquifyDY ? new Float32Array(s.liquifyDY) : new Float32Array(displayW * displayH);
+      // Hot path: no state dispatch, no React re-render
       addLiquifyStroke(
-        dxF, dyF, displayW, displayH,
-        pos.x, pos.y, dx, dy,
+        liqDXRef.current!, liqDYRef.current!, displayW, displayH,
+        pos.x, pos.y, ddx, ddy,
         s.liquifySettings.size, s.liquifySettings.strength, s.liquifySettings.mode,
       );
-      onLiquifyUpdate(dxF, dyF);
+      hasLiquifyRef.current = true;
+      renderCanvas(); // direct imperative render
+      return;
     }
 
     if (s.activeTool === 'skinBrush') {
       const mask = s.skinMask ? new Float32Array(s.skinMask) : new Float32Array(displayW * displayH);
-      const erase = e.altKey;
-      if (erase) eraseSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize);
+      if (e.altKey) eraseSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize);
       else paintSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize, 1);
       onSkinMaskUpdate(mask);
     }
-
     if (s.activeTool === 'privacyBlur') {
       const mask = s.privacyMask ? new Float32Array(s.privacyMask) : new Float32Array(displayW * displayH);
       paintSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize * 1.5, 1);
       onPrivacyMaskUpdate(mask);
     }
-  }, [getCanvasCoords, displayW, displayH, onLiquifyUpdate, onSkinMaskUpdate, onPrivacyMaskUpdate]);
+  }, [getCanvasCoords, displayW, displayH, renderCanvas, onSkinMaskUpdate, onPrivacyMaskUpdate]);
 
   const handleMouseUp = useCallback(() => {
-    const wasDragging = isDragging.current;
+    if (isPanningRef.current) {
+      isPanningRef.current = false;
+      setIsPanning(false);
+      return;
+    }
+
+    if (isLiquifyDragRef.current && liqDXRef.current && liqDYRef.current) {
+      isLiquifyDragRef.current = false;
+      // Sync accumulated displacement to state (one allocation on drag end)
+      onLiquifyUpdate(new Float32Array(liqDXRef.current), new Float32Array(liqDYRef.current));
+      onHistoryPush?.();
+    } else if (isDragging.current && onHistoryPush) {
+      const tool = stateRef.current.activeTool;
+      if (tool === 'skinBrush' || tool === 'privacyBlur') onHistoryPush();
+    }
+
     isDragging.current = false;
     lastPos.current = null;
-    if (wasDragging && onHistoryPush) {
-      const tool = stateRef.current.activeTool;
-      if (tool === 'liquify' || tool === 'skinBrush' || tool === 'privacyBlur') {
-        onHistoryPush();
-      }
-    }
-  }, [onHistoryPush]);
+  }, [onLiquifyUpdate, onHistoryPush]);
 
   const handleMouseLeave = useCallback(() => {
     setCursorPos(null);
+    if (isPanningRef.current) { isPanningRef.current = false; setIsPanning(false); }
     isDragging.current = false;
     lastPos.current = null;
   }, []);
 
-  // --- Drag & Drop handlers ---
+  // Reset zoom/pan on double-click
+  const handleDoubleClick = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // --- Drag & Drop ---
   const loadImageFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
     const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => {
-      onImageLoad(img);
-      URL.revokeObjectURL(url);
-    };
+    img.onload = () => { onImageLoad(img); URL.revokeObjectURL(url); };
     img.src = url;
   }, [onImageLoad]);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    // Only clear if leaving the container itself (not a child)
-    if (e.currentTarget === e.target) setIsDragOver(false);
-  }, []);
-
+  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragOver(true); }, []);
+  const handleDragLeave = useCallback((e: React.DragEvent) => { if (e.currentTarget === e.target) setIsDragOver(false); }, []);
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
@@ -257,13 +406,23 @@ export default function EditorCanvas({
     if (file) loadImageFile(file);
   }, [loadImageFile]);
 
-  // Brush cursor size in pixels
+  // --- Cursor style ---
+  const showBrush = ['liquify', 'skinBrush', 'privacyBlur'].includes(state.activeTool);
   const brushRadius = state.activeTool === 'liquify'
     ? state.liquifySettings.size
     : state.skinSettings.brushSize * (state.activeTool === 'privacyBlur' ? 1.5 : 1);
 
-  const showBrush = ['liquify', 'skinBrush', 'privacyBlur'].includes(state.activeTool);
+  const cursor = isPanning
+    ? 'grabbing'
+    : !state.originalImage
+      ? (isDragOver ? 'copy' : 'default')
+      : state.activeTool === 'select'
+        ? 'grab'
+        : showBrush
+          ? 'none'
+          : 'default';
 
+  // --- Empty state ---
   if (!state.originalImage) {
     return (
       <div
@@ -271,18 +430,15 @@ export default function EditorCanvas({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`flex-1 flex items-center justify-center text-gray-500 transition-colors ${
-          isDragOver ? 'bg-blue-900/30' : 'bg-[#111]'
-        }`}
+        className={`flex-1 flex items-center justify-center transition-colors ${isDragOver ? 'bg-blue-900/30' : 'bg-[#111]'}`}
+        style={{ cursor }}
       >
         <div className="text-center pointer-events-none select-none">
           <div className="text-6xl mb-4">{isDragOver ? '📂' : '📸'}</div>
           <div className="text-lg text-gray-400">画像をアップロードしてください</div>
           <div className="text-sm mt-2 text-gray-600">JPG / PNG / WEBP 対応</div>
           <div className={`mt-6 border-2 border-dashed rounded-xl px-10 py-5 text-sm transition-colors ${
-            isDragOver
-              ? 'border-blue-400 text-blue-300 bg-blue-900/20'
-              : 'border-gray-700 text-gray-600'
+            isDragOver ? 'border-blue-400 text-blue-300 bg-blue-900/20' : 'border-gray-700 text-gray-600'
           }`}>
             {isDragOver ? 'ドロップして開く' : 'ここにドラッグ&ドロップ'}
           </div>
@@ -294,48 +450,40 @@ export default function EditorCanvas({
   return (
     <div
       ref={containerRef}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
+      onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`flex-1 flex items-center justify-center overflow-hidden relative transition-colors ${
+      className={`flex-1 flex items-center justify-center overflow-hidden relative transition-colors select-none ${
         isDragOver ? 'bg-blue-900/30' : 'bg-[#111]'
       }`}
-      style={{ minHeight: 0 }}
+      style={{ minHeight: 0, cursor }}
     >
-      {/* Drag overlay when image is already loaded */}
-      {isDragOver && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="border-2 border-dashed border-blue-400 rounded-xl px-12 py-8 bg-blue-900/40 text-blue-300 text-lg">
-            ドロップして画像を差し替え
-          </div>
-        </div>
-      )}
+      {/* Zoom wrapper — CSS transform only, no pixel re-render on pan/zoom */}
+      <div
+        style={{
+          display: 'inline-block',
+          position: 'relative',
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: 'center',
+          willChange: 'transform',
+        }}
+      >
+        <canvas ref={canvasRef} style={{ display: 'block' }} />
 
-      {/* Checkerboard background for transparent images */}
-      <div className="relative" style={{ display: 'inline-block' }}>
-        <canvas
-          ref={canvasRef}
-          style={{
-            display: 'block',
-            maxWidth: '100%',
-            maxHeight: '100%',
-            cursor: showBrush ? 'none' : 'default',
-          }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-        />
-
-        {/* Custom brush cursor */}
+        {/* Custom brush cursor (in canvas-space, scaled automatically by parent) */}
         {showBrush && cursorPos && displayW > 0 && (
           <div
             className="pointer-events-none absolute rounded-full border-2 border-white/70"
             style={{
-              left: (cursorPos.x / displayW) * 100 + '%',
-              top: (cursorPos.y / displayH) * 100 + '%',
-              width: brushRadius * 2 * (canvasRef.current ? canvasRef.current.getBoundingClientRect().width / displayW : 1),
-              height: brushRadius * 2 * (canvasRef.current ? canvasRef.current.getBoundingClientRect().width / displayW : 1),
+              left: cursorPos.x,
+              top: cursorPos.y,
+              width: brushRadius * 2,
+              height: brushRadius * 2,
               transform: 'translate(-50%, -50%)',
               mixBlendMode: 'difference',
             }}
@@ -344,10 +492,27 @@ export default function EditorCanvas({
 
         {/* Before/After label */}
         {state.showOriginal && (
-          <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+          <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded pointer-events-none">
             オリジナル
           </div>
         )}
+      </div>
+
+      {/* Drag-to-replace overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+          <div className="border-2 border-dashed border-blue-400 rounded-xl px-12 py-8 bg-blue-900/40 text-blue-300 text-lg">
+            ドロップして画像を差し替え
+          </div>
+        </div>
+      )}
+
+      {/* Zoom level badge */}
+      <div
+        className="absolute bottom-2 right-2 bg-black/60 text-white text-[11px] px-2 py-1 rounded pointer-events-none select-none"
+        title="ダブルクリックでリセット"
+      >
+        {Math.round(zoom * 100)}%
       </div>
     </div>
   );
