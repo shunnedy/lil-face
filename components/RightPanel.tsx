@@ -177,6 +177,8 @@ export default function RightPanel({
           onChange={v => onFace('slimJaw', v)} onReset={() => onFace('slimJaw', 0)} onCommit={onFaceCommit} />
         <Slider label="顎の長さ" value={face.chinLength} min={-50} max={50}
           onChange={v => onFace('chinLength', v)} onReset={() => onFace('chinLength', 0)} onCommit={onFaceCommit} />
+        <Slider label="フェイスライン整え" value={face.jawlineSmooth} min={0} max={100}
+          onChange={v => onFace('jawlineSmooth', v)} onReset={() => onFace('jawlineSmooth', 0)} onCommit={onFaceCommit} />
 
         <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">目</div>
         <Slider label="目の大きさ" value={face.eyeSize} min={0} max={100}

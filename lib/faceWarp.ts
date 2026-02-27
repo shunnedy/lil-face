@@ -308,6 +308,44 @@ export function buildFaceControlPoints(
     });
   }
 
+  // ---- Jawline Smooth (フェイスライン整え) ----
+  // For each jaw landmark, compute where it "should" be on the straight reference line
+  // between the chin and the cheek anchors (in face-local U coordinates), then
+  // displace toward that reference to reduce bumps / droopiness.
+  if (adj.jawlineSmooth !== 0) {
+    const strength = adj.jawlineSmooth / 100;
+    const sigma = faceWidth * 0.09;
+    const rightCheekLm = lm[454];
+    const leftCheekLm  = lm[234];
+    const chinLm       = lm[152];
+    if (rightCheekLm && leftCheekLm && chinLm) {
+      const chinU       = projU(chinLm.x, chinLm.y);
+      const rightCheekR = projR(rightCheekLm.x, rightCheekLm.y);
+      const rightCheekU = projU(rightCheekLm.x, rightCheekLm.y);
+      const leftCheekR  = projR(leftCheekLm.x, leftCheekLm.y);
+      const leftCheekU  = projU(leftCheekLm.x, leftCheekLm.y);
+      LM_JAW.forEach(i => {
+        const p = lm[i]; if (!p) return;
+        const pR = projR(p.x, p.y);
+        const pU = projU(p.x, p.y);
+        let refU: number;
+        if (pR >= 0 && rightCheekR > 0) {
+          const t = Math.min(1, pR / rightCheekR);
+          refU = chinU + t * (rightCheekU - chinU);
+        } else if (pR < 0 && leftCheekR < 0) {
+          const t = Math.min(1, pR / leftCheekR);
+          refU = chinU + t * (leftCheekU - chinU);
+        } else {
+          return;
+        }
+        const dU = (refU - pU) * strength * 0.6;
+        if (Math.abs(dU) < 0.1) return;
+        const { dx, dy } = toImg(0, dU);
+        allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+      });
+    }
+  }
+
   return allCPs;
 }
 

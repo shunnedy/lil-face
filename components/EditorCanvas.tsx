@@ -24,8 +24,8 @@ interface Props {
   onToolChange: (tool: EditorState['activeTool']) => void;
 }
 
-/** Fields that affect the "base" image (everything except liquify) */
-interface BaseKey {
+/** Fields that affect the pre-skin base (face warp + color + filter, no skin/privacy) */
+interface PreSkinKey {
   image: HTMLImageElement | null;
   landmarks: FaceLandmark[] | null;
   faceAdj: FaceAdjustments;
@@ -33,11 +33,15 @@ interface BaseKey {
   bodyAnchors: BodyAnchors;
   adj: Adjustments;
   filter: FilterPreset;
+  w: number;
+  h: number;
+}
+
+/** Fields that affect the full base (pre-skin + skin/privacy masks) */
+interface BaseKey extends PreSkinKey {
   skinMask: Float32Array | null;
   skinSettings: SkinSettings;
   privacyMask: Float32Array | null;
-  w: number;
-  h: number;
 }
 
 // Sigma for anchor hit-test and visual display (in canvas pixels)
@@ -76,10 +80,19 @@ export default function EditorCanvas({
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // --- Performance: base image cache ---
-  const baseImgRef = useRef<ImageData | null>(null);
+  // --- Performance: two-level base image cache ---
+  // Level 1: pre-skin (face warp + color + filter, without skin/privacy)
+  const preSkinBaseRef = useRef<ImageData | null>(null);
+  const preSkinKeyRef  = useRef<PreSkinKey | null>(null);
+  // Level 2: full base (preSkin + skin smooth + privacy blur)
+  const baseImgRef     = useRef<ImageData | null>(null);
   const prevBaseKeyRef = useRef<BaseKey | null>(null);
   const blurredBaseRef = useRef<ImageData | null>(null); // for texture preservation
+
+  // --- Local brush mask refs (avoid React dispatch during drag) ---
+  const localSkinMaskRef    = useRef<Float32Array | null>(null);
+  const localPrivacyMaskRef = useRef<Float32Array | null>(null);
+  const isBrushDragRef      = useRef(false);
 
   // --- Performance: local liquify fields during drag ---
   const liqDXRef = useRef<Float32Array | null>(null);
@@ -121,6 +134,14 @@ export default function EditorCanvas({
     }
   }, [state.liquifyDX, state.liquifyDY]);
 
+  // Sync local brush mask refs when state changes (outside brush drag)
+  useEffect(() => {
+    if (!isBrushDragRef.current) {
+      localSkinMaskRef.current    = state.skinMask;
+      localPrivacyMaskRef.current = state.privacyMask;
+    }
+  }, [state.skinMask, state.privacyMask]);
+
   // --- Compute display dimensions ---
   useEffect(() => {
     if (!state.originalImage || !containerRef.current) return;
@@ -155,62 +176,78 @@ export default function EditorCanvas({
       return;
     }
 
-    // --- Check if base needs recompute ---
-    const bk = prevBaseKeyRef.current;
-    const needsBase = !bk ||
-      bk.image !== s.originalImage || bk.landmarks !== s.landmarks ||
-      bk.faceAdj !== s.faceAdjustments || bk.bodyAdj !== s.bodyAdjustments ||
-      bk.bodyAnchors !== s.bodyAnchors ||
-      bk.adj !== s.adjustments || bk.filter !== s.activeFilter ||
-      bk.skinMask !== s.skinMask || bk.skinSettings !== s.skinSettings ||
-      bk.privacyMask !== s.privacyMask || bk.w !== displayW || bk.h !== displayH;
+    // During brush drag use local mask refs to skip React dispatch overhead
+    const skinMask    = isBrushDragRef.current ? localSkinMaskRef.current    : s.skinMask;
+    const privacyMask = isBrushDragRef.current ? localPrivacyMaskRef.current : s.privacyMask;
 
-    if (needsBase) {
+    // --- Level 1: Pre-skin base (face warp + body warp + color + filter) ---
+    // Only recomputed when face/body/color/filter changes — NOT on brush strokes.
+    const pk = preSkinKeyRef.current;
+    const needsPreSkin = !pk ||
+      pk.image !== s.originalImage || pk.landmarks !== s.landmarks ||
+      pk.faceAdj !== s.faceAdjustments || pk.bodyAdj !== s.bodyAdjustments ||
+      pk.bodyAnchors !== s.bodyAnchors || pk.adj !== s.adjustments ||
+      pk.filter !== s.activeFilter || pk.w !== displayW || pk.h !== displayH;
+
+    if (needsPreSkin) {
       ctx.drawImage(s.originalImage, 0, 0, displayW, displayH);
       let id = ctx.getImageData(0, 0, displayW, displayH);
 
-      // Face warp (cached — only on adj changes, not during liquify drag)
       if (s.landmarks && s.landmarks.length > 400) {
         const cps = buildFaceControlPoints(s.landmarks, s.faceAdjustments);
         if (cps.length > 0) id = applyFaceWarp(id, cps);
       }
-
-      // Body warp (instant sliders, same algorithm as face warp)
       if (hasBodyAdjustment(s.bodyAnchors, s.bodyAdjustments)) {
         const bodyCPs = buildBodyControlPoints(s.bodyAnchors, s.bodyAdjustments, displayW, displayH);
         if (bodyCPs.length > 0) id = applyFaceWarp(id, bodyCPs);
       }
-
-      // Skin smooth
-      if (s.skinMask) {
-        let hasMask = false;
-        for (let i = 0; i < s.skinMask.length; i += 200) {
-          if (s.skinMask[i] > 0) { hasMask = true; break; }
-        }
-        if (hasMask) id = applySkinSmooth(id, s.skinMask, s.skinSettings.smoothness, s.skinSettings.skinBrightness);
-      }
-
-      // Privacy blur
-      if (s.privacyMask) {
-        let hasMask = false;
-        for (let i = 0; i < s.privacyMask.length; i += 200) {
-          if (s.privacyMask[i] > 0) { hasMask = true; break; }
-        }
-        if (hasMask) id = applyPrivacyBlur(id, s.privacyMask);
-      }
-
       id = applyColorAdjustments(id, s.adjustments);
       if (s.activeFilter !== 'none') id = applyFilter(id, s.activeFilter);
 
+      preSkinBaseRef.current = id;
+      preSkinKeyRef.current = {
+        image: s.originalImage, landmarks: s.landmarks,
+        faceAdj: s.faceAdjustments, bodyAdj: s.bodyAdjustments,
+        bodyAnchors: s.bodyAnchors, adj: s.adjustments,
+        filter: s.activeFilter, w: displayW, h: displayH,
+      };
+      prevBaseKeyRef.current = null; // invalidate full base
+      blurredBaseRef.current = null;
+    }
+
+    // --- Level 2: Full base (preSkin + skin smooth + privacy blur) ---
+    // During brush drag, always recompute from preSkin (mask mutated in-place).
+    const bk = prevBaseKeyRef.current;
+    const needsBase = isBrushDragRef.current || needsPreSkin || !bk ||
+      bk.skinMask !== skinMask || bk.skinSettings !== s.skinSettings ||
+      bk.privacyMask !== privacyMask;
+
+    if (needsBase) {
+      let id = new ImageData(new Uint8ClampedArray(preSkinBaseRef.current!.data), displayW, displayH);
+
+      if (skinMask) {
+        let hasMask = false;
+        for (let i = 0; i < skinMask.length; i += 200) {
+          if (skinMask[i] > 0) { hasMask = true; break; }
+        }
+        if (hasMask) id = applySkinSmooth(id, skinMask, s.skinSettings.smoothness, s.skinSettings.skinBrightness);
+      }
+      if (privacyMask) {
+        let hasMask = false;
+        for (let i = 0; i < privacyMask.length; i += 200) {
+          if (privacyMask[i] > 0) { hasMask = true; break; }
+        }
+        if (hasMask) id = applyPrivacyBlur(id, privacyMask);
+      }
+
       baseImgRef.current = id;
-      blurredBaseRef.current = null; // invalidate blur cache
+      blurredBaseRef.current = null;
       prevBaseKeyRef.current = {
         image: s.originalImage, landmarks: s.landmarks,
         faceAdj: s.faceAdjustments, bodyAdj: s.bodyAdjustments,
         bodyAnchors: s.bodyAnchors, adj: s.adjustments,
-        filter: s.activeFilter, skinMask: s.skinMask,
-        skinSettings: s.skinSettings, privacyMask: s.privacyMask,
-        w: displayW, h: displayH,
+        filter: s.activeFilter, skinMask, skinSettings: s.skinSettings,
+        privacyMask, w: displayW, h: displayH,
       };
     }
 
@@ -346,17 +383,23 @@ export default function EditorCanvas({
     }
 
     if (s.activeTool === 'skinBrush') {
-      const mask = s.skinMask ? new Float32Array(s.skinMask) : new Float32Array(displayW * displayH);
-      if (e.altKey) eraseSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize);
-      else paintSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize, 1);
-      onSkinMaskUpdate(mask);
+      isBrushDragRef.current = true;
+      localSkinMaskRef.current    = s.skinMask    ? new Float32Array(s.skinMask)    : new Float32Array(displayW * displayH);
+      localPrivacyMaskRef.current = s.privacyMask ? new Float32Array(s.privacyMask) : new Float32Array(displayW * displayH);
+      if (e.altKey) eraseSkinMask(localSkinMaskRef.current, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize);
+      else paintSkinMask(localSkinMaskRef.current, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize, 1);
+      renderCanvas();
+      return;
     }
     if (s.activeTool === 'privacyBlur') {
-      const mask = s.privacyMask ? new Float32Array(s.privacyMask) : new Float32Array(displayW * displayH);
-      paintSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize * 1.5, 1);
-      onPrivacyMaskUpdate(mask);
+      isBrushDragRef.current = true;
+      localSkinMaskRef.current    = s.skinMask    ? new Float32Array(s.skinMask)    : new Float32Array(displayW * displayH);
+      localPrivacyMaskRef.current = s.privacyMask ? new Float32Array(s.privacyMask) : new Float32Array(displayW * displayH);
+      paintSkinMask(localPrivacyMaskRef.current, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize * 1.5, 1);
+      renderCanvas();
+      return;
     }
-  }, [getCanvasCoords, hitTestAnchor, displayW, displayH, onBodyAnchorUpdate, onToolChange, onSkinMaskUpdate, onPrivacyMaskUpdate]);
+  }, [getCanvasCoords, hitTestAnchor, displayW, displayH, onBodyAnchorUpdate, onToolChange, renderCanvas]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const s = stateRef.current;
@@ -395,18 +438,18 @@ export default function EditorCanvas({
       return;
     }
 
-    if (s.activeTool === 'skinBrush') {
-      const mask = s.skinMask ? new Float32Array(s.skinMask) : new Float32Array(displayW * displayH);
-      if (e.altKey) eraseSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize);
-      else paintSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize, 1);
-      onSkinMaskUpdate(mask);
+    if (s.activeTool === 'skinBrush' && isBrushDragRef.current && localSkinMaskRef.current) {
+      if (e.altKey) eraseSkinMask(localSkinMaskRef.current, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize);
+      else paintSkinMask(localSkinMaskRef.current, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize, 1);
+      renderCanvas();
+      return;
     }
-    if (s.activeTool === 'privacyBlur') {
-      const mask = s.privacyMask ? new Float32Array(s.privacyMask) : new Float32Array(displayW * displayH);
-      paintSkinMask(mask, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize * 1.5, 1);
-      onPrivacyMaskUpdate(mask);
+    if (s.activeTool === 'privacyBlur' && isBrushDragRef.current && localPrivacyMaskRef.current) {
+      paintSkinMask(localPrivacyMaskRef.current, displayW, displayH, pos.x, pos.y, s.skinSettings.brushSize * 1.5, 1);
+      renderCanvas();
+      return;
     }
-  }, [getCanvasCoords, displayW, displayH, renderCanvas, onBodyAnchorUpdate, onSkinMaskUpdate, onPrivacyMaskUpdate]);
+  }, [getCanvasCoords, displayW, displayH, renderCanvas, onBodyAnchorUpdate]);
 
   const handleMouseUp = useCallback(() => {
     if (isPanningRef.current) {
@@ -427,22 +470,37 @@ export default function EditorCanvas({
       isLiquifyDragRef.current = false;
       onLiquifyUpdate(new Float32Array(liqDXRef.current), new Float32Array(liqDYRef.current));
       onHistoryPush?.();
-    } else if (isDragging.current && onHistoryPush) {
+    } else if (isBrushDragRef.current) {
+      isBrushDragRef.current = false;
       const tool = stateRef.current.activeTool;
-      if (tool === 'skinBrush' || tool === 'privacyBlur') onHistoryPush();
+      if (tool === 'skinBrush' && localSkinMaskRef.current) {
+        onSkinMaskUpdate(new Float32Array(localSkinMaskRef.current));
+      } else if (tool === 'privacyBlur' && localPrivacyMaskRef.current) {
+        onPrivacyMaskUpdate(new Float32Array(localPrivacyMaskRef.current));
+      }
+      onHistoryPush?.();
     }
 
     isDragging.current = false;
     lastPos.current = null;
-  }, [onLiquifyUpdate, onHistoryPush]);
+  }, [onLiquifyUpdate, onHistoryPush, onSkinMaskUpdate, onPrivacyMaskUpdate]);
 
   const handleMouseLeave = useCallback(() => {
     setCursorPos(null);
     if (isPanningRef.current) { isPanningRef.current = false; setIsPanning(false); }
+    if (isBrushDragRef.current) {
+      isBrushDragRef.current = false;
+      const tool = stateRef.current.activeTool;
+      if (tool === 'skinBrush' && localSkinMaskRef.current) {
+        onSkinMaskUpdate(new Float32Array(localSkinMaskRef.current));
+      } else if (tool === 'privacyBlur' && localPrivacyMaskRef.current) {
+        onPrivacyMaskUpdate(new Float32Array(localPrivacyMaskRef.current));
+      }
+    }
     isDragging.current = false;
     draggingAnchorRef.current = null;
     lastPos.current = null;
-  }, []);
+  }, [onSkinMaskUpdate, onPrivacyMaskUpdate]);
 
   const handleDoubleClick = useCallback(() => {
     setZoom(1);

@@ -23,6 +23,7 @@ export interface FaceAdjustments {
   mouthCorner: number;   // -50 to 50 (lift/drop corners)
   mouthWidth: number;    // -50 to 50 (wider/narrower mouth)
   midFaceShorten: number; // 0 to 100 (shorten nose-to-lip area)
+  jawlineSmooth: number;  // 0 to 100 (smooth/straighten jawline from chin to cheeks)
 }
 
 export interface BodyAnchors {
@@ -164,6 +165,7 @@ export const DEFAULT_FACE: FaceAdjustments = {
   mouthCorner: 0,
   mouthWidth: 0,
   midFaceShorten: 0,
+  jawlineSmooth: 0,
 };
 
 export const DEFAULT_BODY_ADJ: BodyAdjustments = {
