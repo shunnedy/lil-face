@@ -194,7 +194,7 @@ export const DEFAULT_LIQUIFY: LiquifySettings = {
 
 export const DEFAULT_EXPORT: ExportSettings = {
   format: 'jpeg',
-  quality: 0.92,
+  quality: 1.0,
   watermarkEnabled: false,
   watermarkText: '',
   watermarkOpacity: 40,

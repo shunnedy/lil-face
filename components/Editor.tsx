@@ -112,14 +112,14 @@ export default function Editor() {
   }, [setFaceDetecting, setLandmarks]);
 
   const handleExport = useCallback(async () => {
-    if (!displayCanvasRef.current) return;
-    await exportImage(displayCanvasRef.current, state.exportSettings);
-  }, [state.exportSettings]);
+    if (!state.originalImage) return;
+    await exportImage(state, state.exportSettings);
+  }, [state]);
 
   const handleBatchExport = useCallback(async () => {
-    if (!displayCanvasRef.current) return;
-    await batchExport(displayCanvasRef.current, state.exportSettings);
-  }, [state.exportSettings]);
+    if (!state.originalImage) return;
+    await batchExport(state, state.exportSettings);
+  }, [state]);
 
   return (
     <div ref={containerRef} className="flex flex-col h-screen bg-[#111] text-white overflow-hidden">

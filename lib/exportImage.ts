@@ -1,4 +1,5 @@
-import { ExportSettings } from '@/types/editor';
+import { EditorState, ExportSettings } from '@/types/editor';
+import { renderAtOriginalResolution } from './renderFull';
 
 /** Draw watermark text onto a canvas context */
 function drawWatermark(
@@ -38,13 +39,16 @@ function drawWatermark(
 }
 
 /**
- * Export the current canvas content.
- * Draws over a fresh canvas to strip EXIF (canvas export never includes metadata).
+ * Export at original image resolution.
+ * Re-renders the full pipeline at the source image's native pixel dimensions.
  */
 export async function exportImage(
-  sourceCanvas: HTMLCanvasElement,
+  state: EditorState,
   settings: ExportSettings,
 ): Promise<void> {
+  // Render at original resolution (may take a moment for large images)
+  const sourceCanvas = renderAtOriginalResolution(state);
+
   let w = sourceCanvas.width;
   let h = sourceCanvas.height;
 
@@ -66,10 +70,8 @@ export async function exportImage(
   exportCanvas.height = h;
   const ctx = exportCanvas.getContext('2d')!;
 
-  // Draw source image (strips EXIF automatically)
   ctx.drawImage(sourceCanvas, 0, 0, w, h);
 
-  // Watermark
   if (settings.watermarkEnabled && settings.watermarkText) {
     drawWatermark(ctx, w, h, settings);
   }
@@ -82,19 +84,21 @@ export async function exportImage(
   const dataUrl = exportCanvas.toDataURL(mimeType, quality);
   const link = document.createElement('a');
   link.href = dataUrl;
-  const ext = settings.format;
-  link.download = `retouch_${Date.now()}.${ext}`;
+  link.download = `retouch_${Date.now()}.${settings.format}`;
   link.click();
 }
 
-/** Batch export: X/Twitter (1200x675) and Fanclub (1080x1350) */
+/** Batch export: X/Twitter (1200×675), Fanclub (1080×1350), Instagram (1080×1080) */
 export async function batchExport(
-  sourceCanvas: HTMLCanvasElement,
+  state: EditorState,
   settings: ExportSettings,
 ): Promise<void> {
+  // Render once at full resolution, then scale to each target
+  const sourceCanvas = renderAtOriginalResolution(state);
+
   const presets = [
-    { name: 'twitter', w: 1200, h: 675 },
-    { name: 'fanclub', w: 1080, h: 1350 },
+    { name: 'twitter',   w: 1200, h: 675  },
+    { name: 'fanclub',   w: 1080, h: 1350 },
     { name: 'instagram', w: 1080, h: 1080 },
   ];
 
@@ -128,6 +132,6 @@ export async function batchExport(
     link.href = dataUrl;
     link.download = `retouch_${preset.name}_${Date.now()}.jpg`;
     link.click();
-    await new Promise(r => setTimeout(r, 100)); // small delay between downloads
+    await new Promise(r => setTimeout(r, 100));
   }
 }
