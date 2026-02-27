@@ -25,6 +25,19 @@ export interface FaceAdjustments {
   midFaceShorten: number; // 0 to 100 (shorten nose-to-lip area)
 }
 
+export interface BodyAnchors {
+  chest: { x: number; y: number } | null;
+  leftThigh: { x: number; y: number } | null;
+  rightThigh: { x: number; y: number } | null;
+}
+
+export interface BodyAdjustments {
+  chestSize: number;       // -50 to 50 (larger / smaller)
+  thighSize: number;       // -50 to 50 (both thighs together)
+  leftThighSize: number;   // -50 to 50 (left thigh independent)
+  rightThighSize: number;  // -50 to 50 (right thigh independent)
+}
+
 export interface SkinSettings {
   smoothness: number;      // 0 to 100
   skinBrightness: number;  // 0 to 100
@@ -32,9 +45,10 @@ export interface SkinSettings {
 }
 
 export interface LiquifySettings {
-  size: number;     // 20 to 300
-  strength: number; // 1 to 100
+  size: number;                // 20 to 300
+  strength: number;            // 1 to 100
   mode: 'push' | 'pull' | 'restore' | 'expand' | 'shrink';
+  texturePreservation: number; // 0 to 100 (0=normal warp, 100=pattern stays)
 }
 
 export type ActiveTool =
@@ -43,7 +57,10 @@ export type ActiveTool =
   | 'skinBrush'
   | 'spotHeal'
   | 'privacyBlur'
-  | 'crop';
+  | 'crop'
+  | 'placeChest'
+  | 'placeLeftThigh'
+  | 'placeRightThigh';
 
 export type FilterPreset =
   | 'none'
@@ -99,6 +116,8 @@ export interface EditorState {
 
   adjustments: Adjustments;
   faceAdjustments: FaceAdjustments;
+  bodyAdjustments: BodyAdjustments;
+  bodyAnchors: BodyAnchors;
   skinSettings: SkinSettings;
   liquifySettings: LiquifySettings;
   exportSettings: ExportSettings;
@@ -147,6 +166,19 @@ export const DEFAULT_FACE: FaceAdjustments = {
   midFaceShorten: 0,
 };
 
+export const DEFAULT_BODY_ADJ: BodyAdjustments = {
+  chestSize: 0,
+  thighSize: 0,
+  leftThighSize: 0,
+  rightThighSize: 0,
+};
+
+export const DEFAULT_BODY_ANCHORS: BodyAnchors = {
+  chest: null,
+  leftThigh: null,
+  rightThigh: null,
+};
+
 export const DEFAULT_SKIN: SkinSettings = {
   smoothness: 50,
   skinBrightness: 0,
@@ -157,6 +189,7 @@ export const DEFAULT_LIQUIFY: LiquifySettings = {
   size: 80,
   strength: 50,
   mode: 'push',
+  texturePreservation: 0,
 };
 
 export const DEFAULT_EXPORT: ExportSettings = {

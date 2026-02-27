@@ -1,7 +1,7 @@
 'use client';
 import { useRef, useCallback, useEffect } from 'react';
 import { useEditorState, HistorySnapshot } from '@/hooks/useEditorState';
-import { DEFAULT_ADJUSTMENTS, DEFAULT_FACE } from '@/types/editor';
+import { DEFAULT_ADJUSTMENTS, DEFAULT_FACE, DEFAULT_BODY_ADJ, DEFAULT_BODY_ANCHORS } from '@/types/editor';
 import TopBar from './TopBar';
 import LeftPanel from './LeftPanel';
 import RightPanel from './RightPanel';
@@ -15,6 +15,7 @@ export default function Editor() {
     setFilter, setExport, setLandmarks, setFaceDetecting,
     updateLiquifyField, updateSkinMask, updatePrivacyMask,
     setShowOriginal, resetAdjustments, resetFace, resetLiquify, resetSkinMask,
+    setBodyAdj, setBodyAnchor, resetBodyAdj,
     canUndo, canRedo, initHistory, pushHistory, undo, redo,
   } = useEditorState();
 
@@ -27,6 +28,8 @@ export default function Editor() {
   const buildSnapshot = useCallback((): HistorySnapshot => ({
     adjustments: stateRef.current.adjustments,
     faceAdjustments: stateRef.current.faceAdjustments,
+    bodyAdjustments: stateRef.current.bodyAdjustments,
+    bodyAnchors: stateRef.current.bodyAnchors,
     activeFilter: stateRef.current.activeFilter,
     liquifyDX: stateRef.current.liquifyDX ? new Float32Array(stateRef.current.liquifyDX) : null,
     liquifyDY: stateRef.current.liquifyDY ? new Float32Array(stateRef.current.liquifyDY) : null,
@@ -82,6 +85,8 @@ export default function Editor() {
     initHistory({
       adjustments: DEFAULT_ADJUSTMENTS,
       faceAdjustments: DEFAULT_FACE,
+      bodyAdjustments: DEFAULT_BODY_ADJ,
+      bodyAnchors: DEFAULT_BODY_ANCHORS,
       activeFilter: 'none',
       liquifyDX: null,
       liquifyDY: null,
@@ -148,6 +153,8 @@ export default function Editor() {
           onCanvasReady={handleCanvasReady}
           onImageLoad={handleImageLoad}
           onHistoryPush={handlePushHistory}
+          onBodyAnchorUpdate={setBodyAnchor}
+          onToolChange={setTool}
         />
 
         <RightPanel
@@ -164,6 +171,14 @@ export default function Editor() {
           onResetSkinMask={resetSkinMask}
           onAdjustmentCommit={handlePushHistory}
           onFaceCommit={handlePushHistory}
+          onBodyAdj={setBodyAdj}
+          onBodyAnchorPlace={(anchor) => {
+            const toolMap = { chest: 'placeChest', leftThigh: 'placeLeftThigh', rightThigh: 'placeRightThigh' } as const;
+            setTool(toolMap[anchor]);
+          }}
+          onBodyAnchorDelete={(anchor) => setBodyAnchor(anchor, null)}
+          onResetBodyAdj={resetBodyAdj}
+          onBodyAdjCommit={handlePushHistory}
         />
       </div>
     </div>

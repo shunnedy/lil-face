@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import {
   EditorState, Adjustments, FaceAdjustments, SkinSettings,
-  LiquifySettings, FilterPreset, ExportSettings,
+  LiquifySettings, FilterPreset, ExportSettings, BodyAdjustments, BodyAnchors,
 } from '@/types/editor';
 import { FILTER_LIST, FILTER_DEFS } from '@/lib/filters';
 
@@ -83,15 +83,22 @@ interface Props {
   onResetSkinMask: () => void;
   onAdjustmentCommit?: () => void;
   onFaceCommit?: () => void;
+  onBodyAdj: (key: keyof BodyAdjustments, value: number) => void;
+  onBodyAnchorPlace: (anchor: 'chest' | 'leftThigh' | 'rightThigh') => void;
+  onBodyAnchorDelete: (anchor: keyof BodyAnchors) => void;
+  onResetBodyAdj: () => void;
+  onBodyAdjCommit?: () => void;
 }
 
 export default function RightPanel({
   state, onAdjustment, onFace, onSkin, onLiquify, onFilter,
   onExport, onResetAdjustments, onResetFace, onResetLiquify, onResetSkinMask,
   onAdjustmentCommit, onFaceCommit,
+  onBodyAdj, onBodyAnchorPlace, onBodyAnchorDelete, onResetBodyAdj, onBodyAdjCommit,
 }: Props) {
   const { adjustments: adj, faceAdjustments: face, skinSettings: skin,
-    liquifySettings: liq, exportSettings: exp } = state;
+    liquifySettings: liq, exportSettings: exp,
+    bodyAdjustments: bodyAdj, bodyAnchors } = state;
 
   return (
     <div className="w-[272px] bg-[#1c1c1c] border-l border-[#333] overflow-y-auto flex-shrink-0 flex flex-col text-sm">
@@ -244,11 +251,124 @@ export default function RightPanel({
             })}
           </div>
         </div>
+        <Slider label="テクスチャ保持" value={liq.texturePreservation} min={0} max={100}
+          onChange={v => onLiquify('texturePreservation', v)}
+          onReset={() => onLiquify('texturePreservation', 0)} />
+        <div className="text-[10px] text-gray-500 mb-2 -mt-1">
+          網目や格子柄の崩れを抑えます（0=無効、100=最大）
+        </div>
         <button
           onClick={onResetLiquify}
           className="w-full mt-1 py-1 text-xs bg-[#2a2a2a] hover:bg-[#333] text-gray-400 rounded transition-colors"
         >
           ゆがみをリセット
+        </button>
+      </Section>
+
+      {/* === BODY === */}
+      <Section title="ボディ加工" icon="👤" defaultOpen={false}>
+        <div className="text-[11px] text-gray-400 mb-2">
+          各部位をクリックで設置 → スライダーで調整
+        </div>
+
+        {/* Chest */}
+        <div className="mb-3">
+          <div className="text-[10px] text-gray-500 mb-1 font-medium">胸</div>
+          <div className="flex gap-1 mb-1.5">
+            <button
+              onClick={() => onBodyAnchorPlace('chest')}
+              className={`text-[10px] px-2 py-1 rounded flex-1 transition-colors ${
+                state.activeTool === 'placeChest'
+                  ? 'bg-yellow-600 text-white'
+                  : bodyAnchors.chest
+                    ? 'bg-green-800 text-green-200 hover:bg-green-700'
+                    : 'bg-blue-600 text-white hover:bg-blue-500'
+              }`}
+            >
+              {state.activeTool === 'placeChest' ? '▶ クリックで設置中…' : bodyAnchors.chest ? '✓ 胸 設置済' : '+ 胸を設置'}
+            </button>
+            {bodyAnchors.chest && (
+              <button
+                onClick={() => onBodyAnchorDelete('chest')}
+                className="text-[10px] px-2 py-1 rounded bg-[#2a2a2a] text-gray-400 hover:bg-red-900 hover:text-red-300 transition-colors"
+              >
+                削除
+              </button>
+            )}
+          </div>
+          <Slider label="胸の大きさ" value={bodyAdj.chestSize} min={-50} max={50}
+            onChange={v => onBodyAdj('chestSize', v)}
+            onReset={() => onBodyAdj('chestSize', 0)}
+            onCommit={onBodyAdjCommit}
+          />
+        </div>
+
+        {/* Thighs */}
+        <div className="mb-1">
+          <div className="text-[10px] text-gray-500 mb-1 font-medium">太もも</div>
+          <div className="flex gap-1 mb-1.5">
+            <button
+              onClick={() => onBodyAnchorPlace('leftThigh')}
+              className={`text-[10px] px-2 py-1 rounded flex-1 transition-colors ${
+                state.activeTool === 'placeLeftThigh'
+                  ? 'bg-yellow-600 text-white'
+                  : bodyAnchors.leftThigh
+                    ? 'bg-blue-800 text-blue-200 hover:bg-blue-700'
+                    : 'bg-blue-600 text-white hover:bg-blue-500'
+              }`}
+            >
+              {state.activeTool === 'placeLeftThigh' ? '▶ 設置中…' : bodyAnchors.leftThigh ? '✓ 左もも' : '+ 左もも'}
+            </button>
+            {bodyAnchors.leftThigh && (
+              <button
+                onClick={() => onBodyAnchorDelete('leftThigh')}
+                className="text-[10px] px-1.5 py-1 rounded bg-[#2a2a2a] text-gray-400 hover:bg-red-900 hover:text-red-300 transition-colors"
+              >
+                ✕
+              </button>
+            )}
+            <button
+              onClick={() => onBodyAnchorPlace('rightThigh')}
+              className={`text-[10px] px-2 py-1 rounded flex-1 transition-colors ${
+                state.activeTool === 'placeRightThigh'
+                  ? 'bg-yellow-600 text-white'
+                  : bodyAnchors.rightThigh
+                    ? 'bg-green-800 text-green-200 hover:bg-green-700'
+                    : 'bg-blue-600 text-white hover:bg-blue-500'
+              }`}
+            >
+              {state.activeTool === 'placeRightThigh' ? '▶ 設置中…' : bodyAnchors.rightThigh ? '✓ 右もも' : '+ 右もも'}
+            </button>
+            {bodyAnchors.rightThigh && (
+              <button
+                onClick={() => onBodyAnchorDelete('rightThigh')}
+                className="text-[10px] px-1.5 py-1 rounded bg-[#2a2a2a] text-gray-400 hover:bg-red-900 hover:text-red-300 transition-colors"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <Slider label="太もも（まとめて）" value={bodyAdj.thighSize} min={-50} max={50}
+            onChange={v => onBodyAdj('thighSize', v)}
+            onReset={() => onBodyAdj('thighSize', 0)}
+            onCommit={onBodyAdjCommit}
+          />
+          <Slider label="左もも（独立）" value={bodyAdj.leftThighSize} min={-50} max={50}
+            onChange={v => onBodyAdj('leftThighSize', v)}
+            onReset={() => onBodyAdj('leftThighSize', 0)}
+            onCommit={onBodyAdjCommit}
+          />
+          <Slider label="右もも（独立）" value={bodyAdj.rightThighSize} min={-50} max={50}
+            onChange={v => onBodyAdj('rightThighSize', v)}
+            onReset={() => onBodyAdj('rightThighSize', 0)}
+            onCommit={onBodyAdjCommit}
+          />
+        </div>
+        <button
+          onClick={onResetBodyAdj}
+          className="w-full mt-1 py-1 text-xs bg-[#2a2a2a] hover:bg-[#333] text-gray-400 rounded transition-colors"
+        >
+          ボディをリセット
         </button>
       </Section>
 

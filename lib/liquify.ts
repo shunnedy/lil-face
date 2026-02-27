@@ -179,6 +179,80 @@ export function applyLiquifyInto(
   }
 }
 
+/**
+ * Liquify with frequency-separation texture preservation.
+ * t=0: identical to applyLiquifyInto (no preservation).
+ * t=1: shape deforms fully, fine texture stays mostly at original position.
+ *
+ * Algorithm:
+ *   result = (1-t) * warpedFull + t * (warpedLow + origHigh)
+ * where:
+ *   warpedFull = bilinear(src, sx, sy)
+ *   warpedLow  = bilinear(blurredSrc, sx, sy)  ← shape layer, warped
+ *   origHigh   = src[x,y] - blurredSrc[x,y]   ← detail layer, NOT warped
+ */
+export function applyLiquifyWithPreservation(
+  srcData: Uint8ClampedArray,
+  blurredSrcData: Uint8ClampedArray,
+  dstData: Uint8ClampedArray,
+  dxField: Float32Array,
+  dyField: Float32Array,
+  width: number,
+  height: number,
+  t: number,
+): void {
+  if (t <= 0) {
+    applyLiquifyInto(srcData, dstData, dxField, dyField, width, height);
+    return;
+  }
+  const mt = 1 - t;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const sx = x + dxField[idx];
+      const sy = y + dyField[idx];
+      const sx0 = Math.floor(sx);
+      const sy0 = Math.floor(sy);
+      const fx = sx - sx0;
+      const fy = sy - sy0;
+
+      const sx0c = sx0 < 0 ? 0 : sx0 >= width ? width - 1 : sx0;
+      const sx1c = sx0 + 1 >= width ? width - 1 : sx0 + 1;
+      const sy0c = sy0 < 0 ? 0 : sy0 >= height ? height - 1 : sy0;
+      const sy1c = sy0 + 1 >= height ? height - 1 : sy0 + 1;
+
+      const i00 = (sy0c * width + sx0c) * 4;
+      const i10 = (sy0c * width + sx1c) * 4;
+      const i01 = (sy1c * width + sx0c) * 4;
+      const i11 = (sy1c * width + sx1c) * 4;
+      const w00 = (1 - fx) * (1 - fy);
+      const w10 = fx * (1 - fy);
+      const w01 = (1 - fx) * fy;
+      const w11 = fx * fy;
+
+      const oi = idx * 4;
+      const ci = idx * 4; // current pixel (for origHigh)
+
+      for (let c = 0; c < 3; c++) {
+        const warpedFull =
+          srcData[i00+c] * w00 + srcData[i10+c] * w10 +
+          srcData[i01+c] * w01 + srcData[i11+c] * w11;
+        const warpedLow =
+          blurredSrcData[i00+c] * w00 + blurredSrcData[i10+c] * w10 +
+          blurredSrcData[i01+c] * w01 + blurredSrcData[i11+c] * w11;
+        const origHigh = srcData[ci+c] - blurredSrcData[ci+c];
+        const v = mt * warpedFull + t * (warpedLow + origHigh);
+        dstData[oi+c] = v < 0 ? 0 : v > 255 ? 255 : v;
+      }
+      // Alpha: preserve warped alpha without texture separation
+      dstData[oi+3] =
+        srcData[i00+3] * w00 + srcData[i10+3] * w10 +
+        srcData[i01+3] * w01 + srcData[i11+3] * w11;
+    }
+  }
+}
+
 /** Check if the displacement field has any non-zero values */
 export function hasDisplacement(dx: Float32Array | null): boolean {
   if (!dx) return false;
