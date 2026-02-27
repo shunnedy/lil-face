@@ -7,6 +7,10 @@ interface Props {
   onImageLoad: (img: HTMLImageElement) => void;
   onExport: () => void;
   onBatchExport: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }
 
 export default function TopBar({
@@ -16,6 +20,10 @@ export default function TopBar({
   onImageLoad,
   onExport,
   onBatchExport,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -54,6 +62,34 @@ export default function TopBar({
       >
         <span>📂</span> 開く
       </button>
+
+      {/* Undo / Redo */}
+      <div className="flex gap-1">
+        <button
+          onClick={onUndo}
+          disabled={!canUndo}
+          title="元に戻す (Ctrl+Z)"
+          className={`h-8 w-8 flex items-center justify-center rounded text-sm transition-colors ${
+            canUndo
+              ? 'text-gray-200 hover:bg-[#2a2a2a]'
+              : 'text-gray-600 cursor-not-allowed'
+          }`}
+        >
+          ↩
+        </button>
+        <button
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="やり直す (Ctrl+Shift+Z)"
+          className={`h-8 w-8 flex items-center justify-center rounded text-sm transition-colors ${
+            canRedo
+              ? 'text-gray-200 hover:bg-[#2a2a2a]'
+              : 'text-gray-600 cursor-not-allowed'
+          }`}
+        >
+          ↪
+        </button>
+      </div>
 
       <div className="flex-1" />
 

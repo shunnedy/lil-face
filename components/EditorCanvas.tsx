@@ -15,6 +15,8 @@ interface Props {
   onSkinMaskUpdate: (mask: Float32Array) => void;
   onPrivacyMaskUpdate: (mask: Float32Array) => void;
   onCanvasReady: (canvas: HTMLCanvasElement) => void;
+  onImageLoad: (img: HTMLImageElement) => void;
+  onHistoryPush?: () => void;
 }
 
 
@@ -25,6 +27,8 @@ export default function EditorCanvas({
   onSkinMaskUpdate,
   onPrivacyMaskUpdate,
   onCanvasReady,
+  onImageLoad,
+  onHistoryPush,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -32,6 +36,7 @@ export default function EditorCanvas({
   const [displayW, setDisplayW] = useState(0);
   const [displayH, setDisplayH] = useState(0);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const isDragging = useRef(false);
   const lastPos = useRef<{ x: number; y: number } | null>(null);
   const stateRef = useRef(state);
@@ -206,15 +211,51 @@ export default function EditorCanvas({
   }, [getCanvasCoords, displayW, displayH, onLiquifyUpdate, onSkinMaskUpdate, onPrivacyMaskUpdate]);
 
   const handleMouseUp = useCallback(() => {
+    const wasDragging = isDragging.current;
     isDragging.current = false;
     lastPos.current = null;
-  }, []);
+    if (wasDragging && onHistoryPush) {
+      const tool = stateRef.current.activeTool;
+      if (tool === 'liquify' || tool === 'skinBrush' || tool === 'privacyBlur') {
+        onHistoryPush();
+      }
+    }
+  }, [onHistoryPush]);
 
   const handleMouseLeave = useCallback(() => {
     setCursorPos(null);
     isDragging.current = false;
     lastPos.current = null;
   }, []);
+
+  // --- Drag & Drop handlers ---
+  const loadImageFile = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      onImageLoad(img);
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  }, [onImageLoad]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // Only clear if leaving the container itself (not a child)
+    if (e.currentTarget === e.target) setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) loadImageFile(file);
+  }, [loadImageFile]);
 
   // Brush cursor size in pixels
   const brushRadius = state.activeTool === 'liquify'
@@ -227,12 +268,24 @@ export default function EditorCanvas({
     return (
       <div
         ref={containerRef}
-        className="flex-1 flex items-center justify-center bg-[#111] text-gray-500"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`flex-1 flex items-center justify-center text-gray-500 transition-colors ${
+          isDragOver ? 'bg-blue-900/30' : 'bg-[#111]'
+        }`}
       >
-        <div className="text-center">
-          <div className="text-6xl mb-4">📸</div>
-          <div className="text-lg">画像をアップロードしてください</div>
+        <div className="text-center pointer-events-none select-none">
+          <div className="text-6xl mb-4">{isDragOver ? '📂' : '📸'}</div>
+          <div className="text-lg text-gray-400">画像をアップロードしてください</div>
           <div className="text-sm mt-2 text-gray-600">JPG / PNG / WEBP 対応</div>
+          <div className={`mt-6 border-2 border-dashed rounded-xl px-10 py-5 text-sm transition-colors ${
+            isDragOver
+              ? 'border-blue-400 text-blue-300 bg-blue-900/20'
+              : 'border-gray-700 text-gray-600'
+          }`}>
+            {isDragOver ? 'ドロップして開く' : 'ここにドラッグ&ドロップ'}
+          </div>
         </div>
       </div>
     );
@@ -241,9 +294,23 @@ export default function EditorCanvas({
   return (
     <div
       ref={containerRef}
-      className="flex-1 flex items-center justify-center bg-[#111] overflow-hidden relative"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`flex-1 flex items-center justify-center overflow-hidden relative transition-colors ${
+        isDragOver ? 'bg-blue-900/30' : 'bg-[#111]'
+      }`}
       style={{ minHeight: 0 }}
     >
+      {/* Drag overlay when image is already loaded */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+          <div className="border-2 border-dashed border-blue-400 rounded-xl px-12 py-8 bg-blue-900/40 text-blue-300 text-lg">
+            ドロップして画像を差し替え
+          </div>
+        </div>
+      )}
+
       {/* Checkerboard background for transparent images */}
       <div className="relative" style={{ display: 'inline-block' }}>
         <canvas

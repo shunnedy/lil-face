@@ -21,6 +21,8 @@ export interface FaceAdjustments {
   noseTip: number;       // -50 to 50 (raise/lower nose tip)
   lipThickness: number;  // -50 to 50 (thicker/thinner lips)
   mouthCorner: number;   // -50 to 50 (lift/drop corners)
+  mouthWidth: number;    // -50 to 50 (wider/narrower mouth)
+  midFaceShorten: number; // 0 to 100 (shorten nose-to-lip area)
 }
 
 export interface SkinSettings {
@@ -141,6 +143,8 @@ export const DEFAULT_FACE: FaceAdjustments = {
   noseTip: 0,
   lipThickness: 0,
   mouthCorner: 0,
+  mouthWidth: 0,
+  midFaceShorten: 0,
 };
 
 export const DEFAULT_SKIN: SkinSettings = {

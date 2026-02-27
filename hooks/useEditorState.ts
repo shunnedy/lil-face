@@ -1,11 +1,21 @@
 'use client';
-import { useCallback, useReducer, useRef } from 'react';
+import { useCallback, useReducer, useRef, useState } from 'react';
 import {
   EditorState, ActiveTool, Adjustments, FaceAdjustments, SkinSettings,
   LiquifySettings, FilterPreset, ExportSettings, CropState,
   DEFAULT_ADJUSTMENTS, DEFAULT_FACE, DEFAULT_SKIN, DEFAULT_LIQUIFY, DEFAULT_EXPORT,
   FaceLandmark,
 } from '@/types/editor';
+
+export interface HistorySnapshot {
+  adjustments: Adjustments;
+  faceAdjustments: FaceAdjustments;
+  activeFilter: FilterPreset;
+  liquifyDX: Float32Array | null;
+  liquifyDY: Float32Array | null;
+  skinMask: Float32Array | null;
+  privacyMask: Float32Array | null;
+}
 
 type Action =
   | { type: 'SET_IMAGE'; image: HTMLImageElement; width: number; height: number; scale: number }
@@ -27,6 +37,7 @@ type Action =
   | { type: 'RESET_FACE' }
   | { type: 'RESET_LIQUIFY' }
   | { type: 'RESET_SKIN_MASK' }
+  | { type: 'APPLY_SNAPSHOT'; snapshot: HistorySnapshot }
   | { type: 'FORCE_RENDER' };
 
 const initialState: EditorState = {
@@ -124,6 +135,20 @@ function reducer(state: EditorState, action: Action): EditorState {
         skinMask: state.skinMask ? new Float32Array(state.skinMask.length) : null,
         renderVersion: state.renderVersion + 1,
       };
+    case 'APPLY_SNAPSHOT': {
+      const s = action.snapshot;
+      return {
+        ...state,
+        adjustments: s.adjustments,
+        faceAdjustments: s.faceAdjustments,
+        activeFilter: s.activeFilter,
+        liquifyDX: s.liquifyDX,
+        liquifyDY: s.liquifyDY,
+        skinMask: s.skinMask,
+        privacyMask: s.privacyMask,
+        renderVersion: state.renderVersion + 1,
+      };
+    }
     case 'FORCE_RENDER':
       return { ...state, renderVersion: state.renderVersion + 1 };
     default:
@@ -134,6 +159,45 @@ function reducer(state: EditorState, action: Action): EditorState {
 export function useEditorState() {
   const [state, dispatch] = useReducer(reducer, initialState);
 
+  // --- History ---
+  const historyRef = useRef<HistorySnapshot[]>([]);
+  const historyIdxRef = useRef(-1);
+  const [historyMeta, setHistoryMeta] = useState({ idx: -1, len: 0 });
+
+  const canUndo = historyMeta.idx > 0;
+  const canRedo = historyMeta.idx < historyMeta.len - 1;
+
+  const initHistory = useCallback((snapshot: HistorySnapshot) => {
+    historyRef.current = [snapshot];
+    historyIdxRef.current = 0;
+    setHistoryMeta({ idx: 0, len: 1 });
+  }, []);
+
+  const pushHistory = useCallback((snapshot: HistorySnapshot) => {
+    historyRef.current = historyRef.current.slice(0, historyIdxRef.current + 1);
+    historyRef.current.push(snapshot);
+    if (historyRef.current.length > 30) {
+      historyRef.current = historyRef.current.slice(-30);
+    }
+    historyIdxRef.current = historyRef.current.length - 1;
+    setHistoryMeta({ idx: historyIdxRef.current, len: historyRef.current.length });
+  }, []);
+
+  const undo = useCallback(() => {
+    if (historyIdxRef.current <= 0) return;
+    historyIdxRef.current -= 1;
+    setHistoryMeta({ idx: historyIdxRef.current, len: historyRef.current.length });
+    dispatch({ type: 'APPLY_SNAPSHOT', snapshot: historyRef.current[historyIdxRef.current] });
+  }, []);
+
+  const redo = useCallback(() => {
+    if (historyIdxRef.current >= historyRef.current.length - 1) return;
+    historyIdxRef.current += 1;
+    setHistoryMeta({ idx: historyIdxRef.current, len: historyRef.current.length });
+    dispatch({ type: 'APPLY_SNAPSHOT', snapshot: historyRef.current[historyIdxRef.current] });
+  }, []);
+
+  // --- State setters ---
   const setImage = useCallback((image: HTMLImageElement, displayW: number, displayH: number) => {
     const scale = displayW / image.naturalWidth;
     dispatch({ type: 'SET_IMAGE', image, width: image.naturalWidth, height: image.naturalHeight, scale });
@@ -204,5 +268,12 @@ export function useEditorState() {
     resetLiquify,
     resetSkinMask,
     forceRender,
+    // History
+    canUndo,
+    canRedo,
+    initHistory,
+    pushHistory,
+    undo,
+    redo,
   };
 }

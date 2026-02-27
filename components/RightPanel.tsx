@@ -8,10 +8,10 @@ import { FILTER_LIST, FILTER_DEFS } from '@/lib/filters';
 
 // ---- Reusable Slider ----
 function Slider({
-  label, value, min, max, step = 1, unit = '', onChange, onReset,
+  label, value, min, max, step = 1, unit = '', onChange, onReset, onCommit,
 }: {
   label: string; value: number; min: number; max: number; step?: number;
-  unit?: string; onChange: (v: number) => void; onReset?: () => void;
+  unit?: string; onChange: (v: number) => void; onReset?: () => void; onCommit?: () => void;
 }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
@@ -33,6 +33,7 @@ function Slider({
         step={step}
         value={value}
         onChange={e => onChange(Number(e.target.value))}
+        onMouseUp={onCommit}
         className="w-full h-1.5 rounded appearance-none bg-[#3a3a3a] cursor-pointer accent-blue-500"
         style={{
           background: `linear-gradient(to right, #3b82f6 ${pct}%, #3a3a3a ${pct}%)`,
@@ -80,11 +81,14 @@ interface Props {
   onResetFace: () => void;
   onResetLiquify: () => void;
   onResetSkinMask: () => void;
+  onAdjustmentCommit?: () => void;
+  onFaceCommit?: () => void;
 }
 
 export default function RightPanel({
   state, onAdjustment, onFace, onSkin, onLiquify, onFilter,
   onExport, onResetAdjustments, onResetFace, onResetLiquify, onResetSkinMask,
+  onAdjustmentCommit, onFaceCommit,
 }: Props) {
   const { adjustments: adj, faceAdjustments: face, skinSettings: skin,
     liquifySettings: liq, exportSettings: exp } = state;
@@ -98,25 +102,25 @@ export default function RightPanel({
           <button onClick={onResetAdjustments} className="text-[10px] text-gray-500 hover:text-red-400">リセット</button>
         </div>
         <Slider label="明るさ" value={adj.brightness} min={-100} max={100}
-          onChange={v => onAdjustment('brightness', v)} onReset={() => onAdjustment('brightness', 0)} />
+          onChange={v => onAdjustment('brightness', v)} onReset={() => onAdjustment('brightness', 0)} onCommit={onAdjustmentCommit} />
         <Slider label="コントラスト" value={adj.contrast} min={-100} max={100}
-          onChange={v => onAdjustment('contrast', v)} onReset={() => onAdjustment('contrast', 0)} />
+          onChange={v => onAdjustment('contrast', v)} onReset={() => onAdjustment('contrast', 0)} onCommit={onAdjustmentCommit} />
         <Slider label="彩度" value={adj.saturation} min={-100} max={100}
-          onChange={v => onAdjustment('saturation', v)} onReset={() => onAdjustment('saturation', 0)} />
+          onChange={v => onAdjustment('saturation', v)} onReset={() => onAdjustment('saturation', 0)} onCommit={onAdjustmentCommit} />
         <Slider label="色温度（暖かさ）" value={adj.warmth} min={-100} max={100}
-          onChange={v => onAdjustment('warmth', v)} onReset={() => onAdjustment('warmth', 0)} />
+          onChange={v => onAdjustment('warmth', v)} onReset={() => onAdjustment('warmth', 0)} onCommit={onAdjustmentCommit} />
         <Slider label="露出" value={adj.exposure} min={-2} max={2} step={0.05}
-          onChange={v => onAdjustment('exposure', v)} onReset={() => onAdjustment('exposure', 0)} />
+          onChange={v => onAdjustment('exposure', v)} onReset={() => onAdjustment('exposure', 0)} onCommit={onAdjustmentCommit} />
         <Slider label="シャドウ" value={adj.shadows} min={-100} max={100}
-          onChange={v => onAdjustment('shadows', v)} onReset={() => onAdjustment('shadows', 0)} />
+          onChange={v => onAdjustment('shadows', v)} onReset={() => onAdjustment('shadows', 0)} onCommit={onAdjustmentCommit} />
         <Slider label="ハイライト" value={adj.highlights} min={-100} max={100}
-          onChange={v => onAdjustment('highlights', v)} onReset={() => onAdjustment('highlights', 0)} />
+          onChange={v => onAdjustment('highlights', v)} onReset={() => onAdjustment('highlights', 0)} onCommit={onAdjustmentCommit} />
         <Slider label="クラリティ" value={adj.clarity} min={0} max={100}
-          onChange={v => onAdjustment('clarity', v)} onReset={() => onAdjustment('clarity', 0)} />
+          onChange={v => onAdjustment('clarity', v)} onReset={() => onAdjustment('clarity', 0)} onCommit={onAdjustmentCommit} />
         <Slider label="シャープネス" value={adj.sharpness} min={0} max={100}
-          onChange={v => onAdjustment('sharpness', v)} onReset={() => onAdjustment('sharpness', 0)} />
+          onChange={v => onAdjustment('sharpness', v)} onReset={() => onAdjustment('sharpness', 0)} onCommit={onAdjustmentCommit} />
         <Slider label="ビネット" value={adj.vignette} min={0} max={100}
-          onChange={v => onAdjustment('vignette', v)} onReset={() => onAdjustment('vignette', 0)} />
+          onChange={v => onAdjustment('vignette', v)} onReset={() => onAdjustment('vignette', 0)} onCommit={onAdjustmentCommit} />
       </Section>
 
       {/* === FILTER === */}
@@ -161,29 +165,35 @@ export default function RightPanel({
         </div>
         <div className="text-[10px] text-gray-500 mb-1 font-medium">輪郭</div>
         <Slider label="小顔" value={face.smallFace} min={0} max={100}
-          onChange={v => onFace('smallFace', v)} onReset={() => onFace('smallFace', 0)} />
+          onChange={v => onFace('smallFace', v)} onReset={() => onFace('smallFace', 0)} onCommit={onFaceCommit} />
         <Slider label="エラ削り" value={face.slimJaw} min={0} max={100}
-          onChange={v => onFace('slimJaw', v)} onReset={() => onFace('slimJaw', 0)} />
+          onChange={v => onFace('slimJaw', v)} onReset={() => onFace('slimJaw', 0)} onCommit={onFaceCommit} />
         <Slider label="顎の長さ" value={face.chinLength} min={-50} max={50}
-          onChange={v => onFace('chinLength', v)} onReset={() => onFace('chinLength', 0)} />
+          onChange={v => onFace('chinLength', v)} onReset={() => onFace('chinLength', 0)} onCommit={onFaceCommit} />
 
         <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">目</div>
         <Slider label="目の大きさ" value={face.eyeSize} min={0} max={100}
-          onChange={v => onFace('eyeSize', v)} onReset={() => onFace('eyeSize', 0)} />
+          onChange={v => onFace('eyeSize', v)} onReset={() => onFace('eyeSize', 0)} onCommit={onFaceCommit} />
         <Slider label="目の幅" value={face.eyeWidth} min={-50} max={50}
-          onChange={v => onFace('eyeWidth', v)} onReset={() => onFace('eyeWidth', 0)} />
+          onChange={v => onFace('eyeWidth', v)} onReset={() => onFace('eyeWidth', 0)} onCommit={onFaceCommit} />
 
         <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">鼻</div>
         <Slider label="鼻筋細く" value={face.noseSlim} min={0} max={100}
-          onChange={v => onFace('noseSlim', v)} onReset={() => onFace('noseSlim', 0)} />
+          onChange={v => onFace('noseSlim', v)} onReset={() => onFace('noseSlim', 0)} onCommit={onFaceCommit} />
         <Slider label="鼻先" value={face.noseTip} min={-50} max={50}
-          onChange={v => onFace('noseTip', v)} onReset={() => onFace('noseTip', 0)} />
+          onChange={v => onFace('noseTip', v)} onReset={() => onFace('noseTip', 0)} onCommit={onFaceCommit} />
 
         <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">唇・口</div>
         <Slider label="唇の厚み" value={face.lipThickness} min={-50} max={50}
-          onChange={v => onFace('lipThickness', v)} onReset={() => onFace('lipThickness', 0)} />
+          onChange={v => onFace('lipThickness', v)} onReset={() => onFace('lipThickness', 0)} onCommit={onFaceCommit} />
         <Slider label="口角" value={face.mouthCorner} min={-50} max={50}
-          onChange={v => onFace('mouthCorner', v)} onReset={() => onFace('mouthCorner', 0)} />
+          onChange={v => onFace('mouthCorner', v)} onReset={() => onFace('mouthCorner', 0)} onCommit={onFaceCommit} />
+        <Slider label="口の横幅" value={face.mouthWidth} min={-50} max={50}
+          onChange={v => onFace('mouthWidth', v)} onReset={() => onFace('mouthWidth', 0)} onCommit={onFaceCommit} />
+
+        <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">中顔面</div>
+        <Slider label="中顔面短縮" value={face.midFaceShorten} min={0} max={100}
+          onChange={v => onFace('midFaceShorten', v)} onReset={() => onFace('midFaceShorten', 0)} onCommit={onFaceCommit} />
       </Section>
 
       {/* === SKIN === */}

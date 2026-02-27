@@ -195,6 +195,55 @@ export function buildFaceControlPoints(
     });
   }
 
+  // --- Mouth Width ---
+  if (adj.mouthWidth !== 0) {
+    const strength = adj.mouthWidth / 50;
+    const sigma = faceWidth * 0.07;
+    // Mouth corners: 61 (left), 291 (right)
+    // Also include nearby landmarks for natural look
+    const leftCorner = lm[61]; const rightCorner = lm[291];
+    if (leftCorner && rightCorner) {
+      const mouthCx = (leftCorner.x + rightCorner.x) / 2;
+      // Move corners outward (positive) or inward (negative)
+      const delta = faceWidth * 0.03 * strength;
+      [61, 78, 95, 88].forEach(i => {
+        const p = lm[i]; if (!p) return;
+        allCPs.push({ x: p.x, y: p.y, dx: (p.x - mouthCx) > 0 ? delta : -delta, dy: 0, sigma });
+      });
+      [291, 308, 324, 318].forEach(i => {
+        const p = lm[i]; if (!p) return;
+        allCPs.push({ x: p.x, y: p.y, dx: (p.x - mouthCx) > 0 ? delta : -delta, dy: 0, sigma });
+      });
+    }
+  }
+
+  // --- Mid-Face Shorten (中顔面短縮) ---
+  // Compresses the vertical distance between eyes and upper lip
+  if (adj.midFaceShorten !== 0) {
+    const strength = adj.midFaceShorten / 100;
+    const sigma = faceHeight * 0.18;
+    // Get reference Y: bottom of lower eyelid (~landmark 23/253) and nose tip
+    const eyeBottomY = ((lm[23]?.y ?? 0) + (lm[253]?.y ?? 0)) / 2 || cy - faceHeight * 0.15;
+    const lipTopY = lm[0]?.y ?? cy + faceHeight * 0.1;
+    const midFaceRange = lipTopY - eyeBottomY;
+    const delta = midFaceRange * 0.25 * strength;
+
+    // Nose, nostrils, philtrum landmarks — all move up
+    const midFaceLandmarks = [1, 2, 4, 5, 6, 19, 94, 97, 98, 99, 129, 358, 164, 393, 168, 122, 351, 49, 279];
+    midFaceLandmarks.forEach(i => {
+      const p = lm[i]; if (!p) return;
+      // Amount of upward displacement proportional to how far down in mid-face
+      const relY = Math.max(0, Math.min(1, (p.y - eyeBottomY) / (midFaceRange || 1)));
+      allCPs.push({ x: p.x, y: p.y, dx: 0, dy: -delta * relY, sigma });
+    });
+
+    // Upper lip top also moves up slightly
+    LM_UPPER_LIP_TOP.forEach(i => {
+      const p = lm[i]; if (!p) return;
+      allCPs.push({ x: p.x, y: p.y, dx: 0, dy: -delta * 0.5, sigma: faceWidth * 0.1 });
+    });
+  }
+
   return allCPs;
 }
 

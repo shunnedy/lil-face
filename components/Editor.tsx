@@ -1,6 +1,7 @@
 'use client';
 import { useRef, useCallback, useEffect } from 'react';
-import { useEditorState } from '@/hooks/useEditorState';
+import { useEditorState, HistorySnapshot } from '@/hooks/useEditorState';
+import { DEFAULT_ADJUSTMENTS, DEFAULT_FACE } from '@/types/editor';
 import TopBar from './TopBar';
 import LeftPanel from './LeftPanel';
 import RightPanel from './RightPanel';
@@ -14,10 +15,28 @@ export default function Editor() {
     setFilter, setExport, setLandmarks, setFaceDetecting,
     updateLiquifyField, updateSkinMask, updatePrivacyMask,
     setShowOriginal, resetAdjustments, resetFace, resetLiquify, resetSkinMask,
+    canUndo, canRedo, initHistory, pushHistory, undo, redo,
   } = useEditorState();
 
   const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Build a snapshot from current state
+  const buildSnapshot = useCallback((): HistorySnapshot => ({
+    adjustments: stateRef.current.adjustments,
+    faceAdjustments: stateRef.current.faceAdjustments,
+    activeFilter: stateRef.current.activeFilter,
+    liquifyDX: stateRef.current.liquifyDX ? new Float32Array(stateRef.current.liquifyDX) : null,
+    liquifyDY: stateRef.current.liquifyDY ? new Float32Array(stateRef.current.liquifyDY) : null,
+    skinMask: stateRef.current.skinMask ? new Float32Array(stateRef.current.skinMask) : null,
+    privacyMask: stateRef.current.privacyMask ? new Float32Array(stateRef.current.privacyMask) : null,
+  }), []);
+
+  const handlePushHistory = useCallback(() => {
+    pushHistory(buildSnapshot());
+  }, [pushHistory, buildSnapshot]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -32,12 +51,24 @@ export default function Editor() {
 
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Undo: Ctrl+Z
+      if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      // Redo: Ctrl+Shift+Z or Ctrl+Y
+      if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') || (e.ctrlKey && e.key.toLowerCase() === 'y')) {
+        e.preventDefault();
+        redo();
+        return;
+      }
       const fn = keyMap[e.key.toLowerCase()];
       if (fn) { e.preventDefault(); fn(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [setTool]);
+  }, [setTool, undo, redo]);
 
   const handleImageLoad = useCallback((img: HTMLImageElement) => {
     // Compute display scale
@@ -47,7 +78,17 @@ export default function Editor() {
     const dw = Math.round(img.naturalWidth * scale);
     const dh = Math.round(img.naturalHeight * scale);
     setImage(img, dw, dh);
-  }, [setImage]);
+    // Initialize history with clean slate
+    initHistory({
+      adjustments: DEFAULT_ADJUSTMENTS,
+      faceAdjustments: DEFAULT_FACE,
+      activeFilter: 'none',
+      liquifyDX: null,
+      liquifyDY: null,
+      skinMask: null,
+      privacyMask: null,
+    });
+  }, [setImage, initHistory]);
 
   const handleCanvasReady = useCallback((canvas: HTMLCanvasElement) => {
     displayCanvasRef.current = canvas;
@@ -84,6 +125,10 @@ export default function Editor() {
         onImageLoad={handleImageLoad}
         onExport={handleExport}
         onBatchExport={handleBatchExport}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={undo}
+        onRedo={redo}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -101,6 +146,8 @@ export default function Editor() {
           onSkinMaskUpdate={updateSkinMask}
           onPrivacyMaskUpdate={updatePrivacyMask}
           onCanvasReady={handleCanvasReady}
+          onImageLoad={handleImageLoad}
+          onHistoryPush={handlePushHistory}
         />
 
         <RightPanel
@@ -115,6 +162,8 @@ export default function Editor() {
           onResetFace={resetFace}
           onResetLiquify={resetLiquify}
           onResetSkinMask={resetSkinMask}
+          onAdjustmentCommit={handlePushHistory}
+          onFaceCommit={handlePushHistory}
         />
       </div>
     </div>
