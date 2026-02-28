@@ -180,17 +180,57 @@ export default function RightPanel({
         <Slider label="フェイスライン整え" value={face.jawlineSmooth} min={0} max={100}
           onChange={v => onFace('jawlineSmooth', v)} onReset={() => onFace('jawlineSmooth', 0)} onCommit={onFaceCommit} />
 
+        <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">頭・生え際</div>
+        <Slider label="頭の大きさ" value={face.headSize} min={-50} max={50}
+          onChange={v => onFace('headSize', v)} onReset={() => onFace('headSize', 0)} onCommit={onFaceCommit} />
+        <Slider label="生え際の高さ" value={face.hairlineHeight} min={-50} max={50}
+          onChange={v => onFace('hairlineHeight', v)} onReset={() => onFace('hairlineHeight', 0)} onCommit={onFaceCommit} />
+
         <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">目</div>
         <Slider label="目の大きさ" value={face.eyeSize} min={0} max={100}
           onChange={v => onFace('eyeSize', v)} onReset={() => onFace('eyeSize', 0)} onCommit={onFaceCommit} />
-        <Slider label="目の幅" value={face.eyeWidth} min={-50} max={50}
+        <Slider label="目の横幅" value={face.eyeWidth} min={-50} max={50}
           onChange={v => onFace('eyeWidth', v)} onReset={() => onFace('eyeWidth', 0)} onCommit={onFaceCommit} />
+        <Slider label="目の縦幅" value={face.eyeVertical} min={-50} max={50}
+          onChange={v => onFace('eyeVertical', v)} onReset={() => onFace('eyeVertical', 0)} onCommit={onFaceCommit} />
+        <Slider label="目の高さ" value={face.eyeHeight} min={-50} max={50}
+          onChange={v => onFace('eyeHeight', v)} onReset={() => onFace('eyeHeight', 0)} onCommit={onFaceCommit} />
+        <Slider label="目と目の距離" value={face.eyeSpacing} min={-50} max={50}
+          onChange={v => onFace('eyeSpacing', v)} onReset={() => onFace('eyeSpacing', 0)} onCommit={onFaceCommit} />
+        <Slider label="上瞼の膨らみ" value={face.eyeUpperBulge} min={0} max={100}
+          onChange={v => onFace('eyeUpperBulge', v)} onReset={() => onFace('eyeUpperBulge', 0)} onCommit={onFaceCommit} />
+        <Slider label="下瞼の拡張" value={face.eyeLowerExpand} min={0} max={100}
+          onChange={v => onFace('eyeLowerExpand', v)} onReset={() => onFace('eyeLowerExpand', 0)} onCommit={onFaceCommit} />
+        <Slider label="目の傾き（+つり目 / -たれ目）" value={face.eyeTilt} min={-50} max={50}
+          onChange={v => onFace('eyeTilt', v)} onReset={() => onFace('eyeTilt', 0)} onCommit={onFaceCommit} />
+
+        <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">眉毛</div>
+        <Slider label="眉毛の高さ" value={face.eyebrowHeight} min={-50} max={50}
+          onChange={v => onFace('eyebrowHeight', v)} onReset={() => onFace('eyebrowHeight', 0)} onCommit={onFaceCommit} />
+        <Slider label="眉毛の太さ" value={face.eyebrowThickness} min={-50} max={50}
+          onChange={v => onFace('eyebrowThickness', v)} onReset={() => onFace('eyebrowThickness', 0)} onCommit={onFaceCommit} />
+        <Slider label="眉毛の長さ" value={face.eyebrowLength} min={-50} max={50}
+          onChange={v => onFace('eyebrowLength', v)} onReset={() => onFace('eyebrowLength', 0)} onCommit={onFaceCommit} />
+        <Slider label="眉尻の長さ" value={face.eyebrowTailLength} min={-50} max={50}
+          onChange={v => onFace('eyebrowTailLength', v)} onReset={() => onFace('eyebrowTailLength', 0)} onCommit={onFaceCommit} />
+        <Slider label="眉頭の長さ" value={face.eyebrowHeadLength} min={-50} max={50}
+          onChange={v => onFace('eyebrowHeadLength', v)} onReset={() => onFace('eyebrowHeadLength', 0)} onCommit={onFaceCommit} />
+        <Slider label="眉毛の傾き" value={face.eyebrowTilt} min={-50} max={50}
+          onChange={v => onFace('eyebrowTilt', v)} onReset={() => onFace('eyebrowTilt', 0)} onCommit={onFaceCommit} />
+        <Slider label="眉山の高さ" value={face.eyebrowPeakHeight} min={-50} max={50}
+          onChange={v => onFace('eyebrowPeakHeight', v)} onReset={() => onFace('eyebrowPeakHeight', 0)} onCommit={onFaceCommit} />
 
         <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">鼻</div>
-        <Slider label="鼻筋細く" value={face.noseSlim} min={0} max={100}
+        <Slider label="鼻翼幅" value={face.noseSlim} min={0} max={100}
           onChange={v => onFace('noseSlim', v)} onReset={() => onFace('noseSlim', 0)} onCommit={onFaceCommit} />
-        <Slider label="鼻先" value={face.noseTip} min={-50} max={50}
+        <Slider label="鼻先の上下" value={face.noseTip} min={-50} max={50}
           onChange={v => onFace('noseTip', v)} onReset={() => onFace('noseTip', 0)} onCommit={onFaceCommit} />
+        <Slider label="鼻根の太さ" value={face.noseRootWidth} min={-50} max={50}
+          onChange={v => onFace('noseRootWidth', v)} onReset={() => onFace('noseRootWidth', 0)} onCommit={onFaceCommit} />
+        <Slider label="鼻筋の太さ" value={face.noseBridgeWidth} min={-50} max={50}
+          onChange={v => onFace('noseBridgeWidth', v)} onReset={() => onFace('noseBridgeWidth', 0)} onCommit={onFaceCommit} />
+        <Slider label="鼻先の太さ" value={face.noseTipWidth} min={-50} max={50}
+          onChange={v => onFace('noseTipWidth', v)} onReset={() => onFace('noseTipWidth', 0)} onCommit={onFaceCommit} />
 
         <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">唇・口</div>
         <Slider label="唇の厚み" value={face.lipThickness} min={-50} max={50}
@@ -199,6 +239,12 @@ export default function RightPanel({
           onChange={v => onFace('mouthCorner', v)} onReset={() => onFace('mouthCorner', 0)} onCommit={onFaceCommit} />
         <Slider label="口の横幅" value={face.mouthWidth} min={-50} max={50}
           onChange={v => onFace('mouthWidth', v)} onReset={() => onFace('mouthWidth', 0)} onCommit={onFaceCommit} />
+        <Slider label="口の高さ" value={face.mouthHeight} min={-50} max={50}
+          onChange={v => onFace('mouthHeight', v)} onReset={() => onFace('mouthHeight', 0)} onCommit={onFaceCommit} />
+        <Slider label="口の左右移動" value={face.mouthShift} min={-50} max={50}
+          onChange={v => onFace('mouthShift', v)} onReset={() => onFace('mouthShift', 0)} onCommit={onFaceCommit} />
+        <Slider label="M字リップ" value={face.mLip} min={0} max={100}
+          onChange={v => onFace('mLip', v)} onReset={() => onFace('mLip', 0)} onCommit={onFaceCommit} />
 
         <div className="text-[10px] text-gray-500 mb-1 mt-2 font-medium">中顔面</div>
         <Slider label="中顔面短縮" value={face.midFaceShorten} min={0} max={100}

@@ -1,6 +1,25 @@
 import { FaceLandmark, FaceAdjustments } from '@/types/editor';
 
 // MediaPipe FaceMesh key landmark indices
+// Upper/lower eyelid splits
+const LM_RIGHT_EYE_UPPER = [159, 160, 161, 158, 157];
+const LM_RIGHT_EYE_LOWER = [145, 144, 163, 7];
+const LM_LEFT_EYE_UPPER  = [386, 385, 384, 387, 388];
+const LM_LEFT_EYE_LOWER  = [374, 373, 390, 249];
+
+// Eyebrows (inner/head → outer/tail)
+const LM_RIGHT_BROW = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
+const LM_LEFT_BROW  = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
+
+// Full mouth contour
+const LM_MOUTH_ALL = [
+  61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291,
+  146, 91, 181, 84, 17, 314, 405, 321, 375,
+];
+
+// Hairline (top of face oval)
+const LM_HAIRLINE = [10, 338, 297, 332, 284, 251, 389, 21, 54, 103, 67, 109];
+
 const LM_JAW = [
   // Right cheek/jaw (image right)
   356, 454, 323, 361, 288, 397, 365, 379, 378, 400,
@@ -305,6 +324,336 @@ export function buildFaceControlPoints(
       const p = lm[i]; if (!p) return;
       const { dx, dy } = toImg(0, delta * 0.5);
       allCPs.push({ x: p.x, y: p.y, dx, dy, sigma: faceWidth * 0.1 });
+    });
+  }
+
+  // ---- Eye Height (目の高さ / 上下移動) ----
+  if (adj.eyeHeight !== 0) {
+    const strength = adj.eyeHeight / 50;
+    const delta = faceHeight * 0.05 * strength;
+    const sigma = faceWidth * 0.10;
+    [...LM_LEFT_EYE, ...LM_RIGHT_EYE].forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const { dx, dy } = toImg(0, delta);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+  }
+
+  // ---- Eye Vertical Size (縦幅変更) ----
+  if (adj.eyeVertical !== 0) {
+    const strength = adj.eyeVertical / 50;
+    const delta = faceHeight * 0.022 * strength;
+    const sigma = faceWidth * 0.055;
+    const expand = (upper: number[], lower: number[]) => {
+      upper.forEach(i => { const p = lm[i]; if (!p) return; const { dx, dy } = toImg(0, delta); allCPs.push({ x: p.x, y: p.y, dx, dy, sigma }); });
+      lower.forEach(i => { const p = lm[i]; if (!p) return; const { dx, dy } = toImg(0, -delta); allCPs.push({ x: p.x, y: p.y, dx, dy, sigma }); });
+    };
+    expand(LM_RIGHT_EYE_UPPER, LM_RIGHT_EYE_LOWER);
+    expand(LM_LEFT_EYE_UPPER, LM_LEFT_EYE_LOWER);
+  }
+
+  // ---- Eye Spacing (目同士の距離) ----
+  if (adj.eyeSpacing !== 0) {
+    const strength = adj.eyeSpacing / 50;
+    const delta = faceWidth * 0.04 * strength;
+    const sigma = faceWidth * 0.11;
+    [...LM_LEFT_EYE, ...LM_RIGHT_EYE].forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const dir = projR(p.x, p.y) >= 0 ? 1 : -1;
+      const { dx, dy } = toImg(dir * delta, 0);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+  }
+
+  // ---- Eye Upper Bulge (上向きの膨らみ) ----
+  if (adj.eyeUpperBulge !== 0) {
+    const strength = adj.eyeUpperBulge / 100;
+    const delta = faceHeight * 0.028 * strength;
+    const sigma = faceWidth * 0.05;
+    [...LM_RIGHT_EYE_UPPER, ...LM_LEFT_EYE_UPPER].forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const { dx, dy } = toImg(0, delta);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+  }
+
+  // ---- Eye Lower Expand (下瞼の拡張) ----
+  if (adj.eyeLowerExpand !== 0) {
+    const strength = adj.eyeLowerExpand / 100;
+    const delta = faceHeight * 0.018 * strength;
+    const sigma = faceWidth * 0.05;
+    [...LM_RIGHT_EYE_LOWER, ...LM_LEFT_EYE_LOWER].forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const { dx, dy } = toImg(0, -delta);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+  }
+
+  // ---- Eye Tilt (つりめ / たれめ) ----
+  if (adj.eyeTilt !== 0) {
+    const strength = adj.eyeTilt / 50;
+    const sigma = faceWidth * 0.06;
+    const delta = faceHeight * 0.022 * strength;
+    // right eye: outer corner = 33, inner = 133
+    // left eye:  outer corner = 263, inner = 362
+    const tiltCorners = (outerIdx: number, innerIdx: number) => {
+      const outer = lm[outerIdx]; if (outer) { const { dx, dy } = toImg(0, delta); allCPs.push({ x: outer.x, y: outer.y, dx, dy, sigma }); }
+      const inner = lm[innerIdx]; if (inner) { const { dx, dy } = toImg(0, -delta * 0.35); allCPs.push({ x: inner.x, y: inner.y, dx, dy, sigma }); }
+    };
+    tiltCorners(33, 133);
+    tiltCorners(263, 362);
+  }
+
+  // ---- Mouth Height (口の高さ) ----
+  if (adj.mouthHeight !== 0) {
+    const strength = adj.mouthHeight / 50;
+    const delta = faceHeight * 0.04 * strength;
+    const sigma = faceWidth * 0.13;
+    LM_MOUTH_ALL.forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const { dx, dy } = toImg(0, delta);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+  }
+
+  // ---- Mouth Shift (口を左右に移動) ----
+  if (adj.mouthShift !== 0) {
+    const strength = adj.mouthShift / 50;
+    const delta = faceWidth * 0.04 * strength;
+    const sigma = faceWidth * 0.13;
+    LM_MOUTH_ALL.forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const { dx, dy } = toImg(delta, 0);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+  }
+
+  // ---- M-Lip (M字リップ / キューピッドボウ) ----
+  if (adj.mLip !== 0) {
+    const strength = adj.mLip / 100;
+    const sigma = faceWidth * 0.04;
+    const delta = faceHeight * 0.016 * strength;
+    // Peaks at 37 and 267, dip at 0
+    [37, 267, 39, 269].forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const { dx, dy } = toImg(0, delta);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+    const center = lm[0]; if (center) { const { dx, dy } = toImg(0, -delta * 0.45); allCPs.push({ x: center.x, y: center.y, dx, dy, sigma }); }
+  }
+
+  // ---- Nose Root Width (鼻根の太さ) ----
+  if (adj.noseRootWidth !== 0) {
+    const strength = adj.noseRootWidth / 50;
+    const sigma = faceWidth * 0.07;
+    const halfW = faceWidth * 0.045;
+    const disp = halfW * strength;
+    [lm[168], lm[6]].forEach(p => {
+      if (!p) return;
+      const lx = p.x - faceRight.x * halfW, ly = p.y - faceRight.y * halfW;
+      const rx = p.x + faceRight.x * halfW, ry = p.y + faceRight.y * halfW;
+      allCPs.push({ x: lx, y: ly, dx: -faceRight.x * disp, dy: -faceRight.y * disp, sigma });
+      allCPs.push({ x: rx, y: ry, dx:  faceRight.x * disp, dy:  faceRight.y * disp, sigma });
+    });
+  }
+
+  // ---- Nose Bridge Width (鼻筋の太さ) ----
+  if (adj.noseBridgeWidth !== 0) {
+    const strength = adj.noseBridgeWidth / 50;
+    const sigma = faceWidth * 0.055;
+    const halfW = faceWidth * 0.035;
+    const disp = halfW * strength;
+    [lm[197], lm[195], lm[5]].forEach(p => {
+      if (!p) return;
+      const lx = p.x - faceRight.x * halfW, ly = p.y - faceRight.y * halfW;
+      const rx = p.x + faceRight.x * halfW, ry = p.y + faceRight.y * halfW;
+      allCPs.push({ x: lx, y: ly, dx: -faceRight.x * disp, dy: -faceRight.y * disp, sigma });
+      allCPs.push({ x: rx, y: ry, dx:  faceRight.x * disp, dy:  faceRight.y * disp, sigma });
+    });
+  }
+
+  // ---- Nose Tip Width (鼻先の太さ) ----
+  if (adj.noseTipWidth !== 0) {
+    const strength = adj.noseTipWidth / 50;
+    const sigma = faceWidth * 0.05;
+    const halfW = faceWidth * 0.055;
+    const disp = halfW * strength;
+    [lm[1], lm[4], lm[19], lm[94]].forEach(p => {
+      if (!p) return;
+      const lx = p.x - faceRight.x * halfW, ly = p.y - faceRight.y * halfW;
+      const rx = p.x + faceRight.x * halfW, ry = p.y + faceRight.y * halfW;
+      allCPs.push({ x: lx, y: ly, dx: -faceRight.x * disp * 0.8, dy: -faceRight.y * disp * 0.8, sigma });
+      allCPs.push({ x: rx, y: ry, dx:  faceRight.x * disp * 0.8, dy:  faceRight.y * disp * 0.8, sigma });
+    });
+  }
+
+  // ---- Eyebrow Height (眉毛の高さ) ----
+  if (adj.eyebrowHeight !== 0) {
+    const strength = adj.eyebrowHeight / 50;
+    const delta = faceHeight * 0.04 * strength;
+    const sigma = faceWidth * 0.09;
+    [...LM_RIGHT_BROW, ...LM_LEFT_BROW].forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const { dx, dy } = toImg(0, delta);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+  }
+
+  // ---- Eyebrow Thickness (眉毛の太さ) ----
+  if (adj.eyebrowThickness !== 0) {
+    const strength = adj.eyebrowThickness / 50;
+    const delta = faceHeight * 0.018 * strength;
+    const sigma = faceWidth * 0.045;
+    [...LM_RIGHT_BROW, ...LM_LEFT_BROW].forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const { dx, dy } = toImg(0, delta);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+  }
+
+  // ---- Eyebrow Length (眉毛の長さ / 全体) ----
+  if (adj.eyebrowLength !== 0) {
+    const strength = adj.eyebrowLength / 50;
+    const sigma = faceWidth * 0.04;
+    const delta = faceWidth * 0.03 * strength;
+    const extendBothEnds = (indices: number[], rightSide: boolean) => {
+      const pts = indices.map(i => lm[i]).filter(Boolean) as FaceLandmark[];
+      if (pts.length === 0) return;
+      const prs = pts.map(p => projR(p.x, p.y));
+      const maxPR = Math.max(...prs), minPR = Math.min(...prs);
+      const range = maxPR - minPR; if (range < 1) return;
+      indices.forEach(i => {
+        const p = lm[i]; if (!p) return;
+        const pr = projR(p.x, p.y);
+        const tOuter = rightSide ? (pr - minPR) / range : (maxPR - pr) / range;
+        const outerDisp = tOuter * delta;
+        const innerDisp = (1 - tOuter) * delta * 0.5;
+        const dir = rightSide ? 1 : -1;
+        const { dx, dy } = toImg(dir * (outerDisp - innerDisp), 0);
+        allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+      });
+    };
+    extendBothEnds(LM_RIGHT_BROW, true);
+    extendBothEnds(LM_LEFT_BROW, false);
+  }
+
+  // ---- Eyebrow Tail Length (眉尻側の長さ) ----
+  if (adj.eyebrowTailLength !== 0) {
+    const strength = adj.eyebrowTailLength / 50;
+    const sigma = faceWidth * 0.04;
+    const delta = faceWidth * 0.035 * strength;
+    const extendTail = (indices: number[], rightSide: boolean) => {
+      const pts = indices.map(i => lm[i]).filter(Boolean) as FaceLandmark[];
+      if (pts.length === 0) return;
+      const prs = pts.map(p => projR(p.x, p.y));
+      const tailPR = rightSide ? Math.max(...prs) : Math.min(...prs);
+      const headPR = rightSide ? Math.min(...prs) : Math.max(...prs);
+      const range = Math.abs(tailPR - headPR); if (range < 1) return;
+      indices.forEach(i => {
+        const p = lm[i]; if (!p) return;
+        const distFromTail = Math.abs(projR(p.x, p.y) - tailPR);
+        const t = Math.max(0, 1 - distFromTail / (range * 0.45));
+        if (t < 0.01) return;
+        const dir = rightSide ? 1 : -1;
+        const { dx, dy } = toImg(dir * delta * t, 0);
+        allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+      });
+    };
+    extendTail(LM_RIGHT_BROW, true);
+    extendTail(LM_LEFT_BROW, false);
+  }
+
+  // ---- Eyebrow Head Length (眉頭側の長さ) ----
+  if (adj.eyebrowHeadLength !== 0) {
+    const strength = adj.eyebrowHeadLength / 50;
+    const sigma = faceWidth * 0.04;
+    const delta = faceWidth * 0.03 * strength;
+    const extendHead = (indices: number[], rightSide: boolean) => {
+      const pts = indices.map(i => lm[i]).filter(Boolean) as FaceLandmark[];
+      if (pts.length === 0) return;
+      const prs = pts.map(p => projR(p.x, p.y));
+      const headPR = rightSide ? Math.min(...prs) : Math.max(...prs);
+      const tailPR = rightSide ? Math.max(...prs) : Math.min(...prs);
+      const range = Math.abs(tailPR - headPR); if (range < 1) return;
+      indices.forEach(i => {
+        const p = lm[i]; if (!p) return;
+        const distFromHead = Math.abs(projR(p.x, p.y) - headPR);
+        const t = Math.max(0, 1 - distFromHead / (range * 0.45));
+        if (t < 0.01) return;
+        const dir = rightSide ? -1 : 1; // toward nose center
+        const { dx, dy } = toImg(dir * delta * t, 0);
+        allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+      });
+    };
+    extendHead(LM_RIGHT_BROW, true);
+    extendHead(LM_LEFT_BROW, false);
+  }
+
+  // ---- Eyebrow Tilt (眉毛の傾き) ----
+  if (adj.eyebrowTilt !== 0) {
+    const strength = adj.eyebrowTilt / 50;
+    const sigma = faceWidth * 0.04;
+    const delta = faceHeight * 0.028 * strength;
+    const tiltBrow = (indices: number[], rightSide: boolean) => {
+      const pts = indices.map(i => lm[i]).filter(Boolean) as FaceLandmark[];
+      if (pts.length === 0) return;
+      const prs = pts.map(p => projR(p.x, p.y));
+      const maxPR = Math.max(...prs), minPR = Math.min(...prs);
+      const range = maxPR - minPR; if (range < 1) return;
+      indices.forEach(i => {
+        const p = lm[i]; if (!p) return;
+        const pr = projR(p.x, p.y);
+        const t = rightSide ? (pr - minPR) / range : (maxPR - pr) / range; // 0=head, 1=tail
+        const { dx, dy } = toImg(0, delta * (2 * t - 1)); // tail up, head down
+        allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+      });
+    };
+    tiltBrow(LM_RIGHT_BROW, true);
+    tiltBrow(LM_LEFT_BROW, false);
+  }
+
+  // ---- Eyebrow Peak Height (眉山の高さ) ----
+  if (adj.eyebrowPeakHeight !== 0) {
+    const strength = adj.eyebrowPeakHeight / 50;
+    const delta = faceHeight * 0.025 * strength;
+    const sigma = faceWidth * 0.07;
+    const raisePeak = (indices: number[]) => {
+      const pts = indices.map(i => lm[i]).filter(Boolean) as FaceLandmark[];
+      if (pts.length === 0) return;
+      // Peak = landmark with highest projU (topmost in face-local coords)
+      let peakP = pts[0];
+      let maxU = projU(pts[0].x, pts[0].y);
+      pts.forEach(p => { const u = projU(p.x, p.y); if (u > maxU) { maxU = u; peakP = p; } });
+      const { dx, dy } = toImg(0, delta);
+      allCPs.push({ x: peakP.x, y: peakP.y, dx, dy, sigma });
+    };
+    raisePeak(LM_RIGHT_BROW);
+    raisePeak(LM_LEFT_BROW);
+  }
+
+  // ---- Head Size (頭の大きさ) ----
+  if (adj.headSize !== 0) {
+    const strength = adj.headSize / 50;
+    const sigma = faceWidth * 0.30;
+    FACE_OVAL_INDICES.forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const pR = projR(p.x, p.y);
+      const pU = projU(p.x, p.y);
+      const { dx, dy } = toImg(pR * strength * 0.22, pU * strength * 0.22);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
+    });
+  }
+
+  // ---- Hairline Height (生え際の高さ / おでこ) ----
+  // + = raise hairline (more forehead visible) / − = lower hairline (less forehead)
+  if (adj.hairlineHeight !== 0) {
+    const strength = adj.hairlineHeight / 50;
+    const delta = faceHeight * 0.06 * strength;
+    const sigma = faceWidth * 0.20;
+    LM_HAIRLINE.forEach(i => {
+      const p = lm[i]; if (!p) return;
+      const { dx, dy } = toImg(0, delta);
+      allCPs.push({ x: p.x, y: p.y, dx, dy, sigma });
     });
   }
 

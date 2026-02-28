@@ -12,18 +12,44 @@ export interface Adjustments {
 }
 
 export interface FaceAdjustments {
-  smallFace: number;     // 0 to 100  (slim overall face)
-  slimJaw: number;       // 0 to 100  (slim lower jaw/cheek)
-  chinLength: number;    // -50 to 50 (chin longer/shorter)
-  eyeSize: number;       // 0 to 100  (enlarge eyes)
-  eyeWidth: number;      // -50 to 50 (widen/narrow eyes)
-  noseSlim: number;      // 0 to 100  (slim nose wings)
-  noseTip: number;       // -50 to 50 (raise/lower nose tip)
-  lipThickness: number;  // -50 to 50 (thicker/thinner lips)
-  mouthCorner: number;   // -50 to 50 (lift/drop corners)
-  mouthWidth: number;    // -50 to 50 (wider/narrower mouth)
-  midFaceShorten: number; // 0 to 100 (shorten nose-to-lip area)
-  jawlineSmooth: number;  // 0 to 100 (smooth/straighten jawline from chin to cheeks)
+  // 輪郭
+  smallFace: number;     // 0 to 100
+  slimJaw: number;       // 0 to 100
+  chinLength: number;    // -50 to 50
+  jawlineSmooth: number; // 0 to 100
+  midFaceShorten: number; // 0 to 100
+  headSize: number;       // -50 to 50
+  hairlineHeight: number; // -50 to 50 (+ = raise / wider forehead)
+  // 目
+  eyeSize: number;        // 0 to 100
+  eyeWidth: number;       // -50 to 50
+  eyeHeight: number;      // -50 to 50 (move up/down)
+  eyeVertical: number;    // -50 to 50 (vertical size)
+  eyeSpacing: number;     // -50 to 50 (distance between eyes)
+  eyeUpperBulge: number;  // 0 to 100  (upper eyelid prominence)
+  eyeLowerExpand: number; // 0 to 100  (lower eyelid expansion)
+  eyeTilt: number;        // -50 to 50 (+ = cat eye / - = droopy)
+  // 鼻
+  noseSlim: number;       // 0 to 100  (wing width)
+  noseTip: number;        // -50 to 50 (raise/lower tip)
+  noseRootWidth: number;  // -50 to 50 (root/bridge-top width)
+  noseBridgeWidth: number;// -50 to 50 (mid-bridge width)
+  noseTipWidth: number;   // -50 to 50 (nose tip width)
+  // 唇・口
+  lipThickness: number;   // -50 to 50
+  mouthCorner: number;    // -50 to 50
+  mouthWidth: number;     // -50 to 50
+  mouthHeight: number;    // -50 to 50 (move up/down)
+  mouthShift: number;     // -50 to 50 (move left/right)
+  mLip: number;           // 0 to 100  (M-shaped Cupid's bow)
+  // 眉毛
+  eyebrowHeight: number;      // -50 to 50
+  eyebrowThickness: number;   // -50 to 50
+  eyebrowLength: number;      // -50 to 50
+  eyebrowTailLength: number;  // -50 to 50
+  eyebrowHeadLength: number;  // -50 to 50
+  eyebrowTilt: number;        // -50 to 50 (outer up = angled)
+  eyebrowPeakHeight: number;  // -50 to 50
 }
 
 export interface BodyAnchors {
@@ -154,18 +180,15 @@ export const DEFAULT_ADJUSTMENTS: Adjustments = {
 };
 
 export const DEFAULT_FACE: FaceAdjustments = {
-  smallFace: 0,
-  slimJaw: 0,
-  chinLength: 0,
-  eyeSize: 0,
-  eyeWidth: 0,
-  noseSlim: 0,
-  noseTip: 0,
-  lipThickness: 0,
-  mouthCorner: 0,
-  mouthWidth: 0,
-  midFaceShorten: 0,
-  jawlineSmooth: 0,
+  smallFace: 0, slimJaw: 0, chinLength: 0, jawlineSmooth: 0,
+  midFaceShorten: 0, headSize: 0, hairlineHeight: 0,
+  eyeSize: 0, eyeWidth: 0, eyeHeight: 0, eyeVertical: 0,
+  eyeSpacing: 0, eyeUpperBulge: 0, eyeLowerExpand: 0, eyeTilt: 0,
+  noseSlim: 0, noseTip: 0, noseRootWidth: 0, noseBridgeWidth: 0, noseTipWidth: 0,
+  lipThickness: 0, mouthCorner: 0, mouthWidth: 0,
+  mouthHeight: 0, mouthShift: 0, mLip: 0,
+  eyebrowHeight: 0, eyebrowThickness: 0, eyebrowLength: 0,
+  eyebrowTailLength: 0, eyebrowHeadLength: 0, eyebrowTilt: 0, eyebrowPeakHeight: 0,
 };
 
 export const DEFAULT_BODY_ADJ: BodyAdjustments = {
